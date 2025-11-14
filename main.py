@@ -51,10 +51,12 @@ YOUR_USERNAME = '@akbhai007' # Replace with your Telegram username (without the 
 
 # Backup Configuration
 BACKUP_INTERVAL = 3600  # Backup every 1 hour (in seconds)
-GITHUB_BACKUP_ENABLED = True  # Set to False to disable auto-backup
+GITHUB_BACKUP_ENABLED = os.environ.get('GITHUB_BACKUP_ENABLED', 'True').lower() == 'true'
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')  # GitHub Personal Access Token
 GITHUB_REPO = os.environ.get('GITHUB_REPO', 'akbhai/host-bot')  # Format: username/repo
-BACKUP_METHOD = os.environ.get('BACKUP_METHOD', 'git')  # 'git' or 'api'
+# Auto-detect Railway environment
+IS_RAILWAY = os.environ.get('RAILWAY_ENVIRONMENT') is not None or os.environ.get('RAILWAY_STATIC_URL') is not None
+BACKUP_METHOD = os.environ.get('BACKUP_METHOD', 'api' if IS_RAILWAY else 'git')  # Auto-detect
 UPDATE_CHANNEL = 'https://t.me/+Y2QWCIycJPplMDE1' # Replace with your update channel link
 
 # Folder setup - using absolute paths
@@ -799,8 +801,14 @@ def backup_to_github():
         backup_via_git()
 
 def backup_via_git():
-    """Backup using Git commands (for local/VPS hosting)"""
+    """Backup using Git commands (for local/VPS hosting ONLY - NOT for Railway)"""
     try:
+        # Safety check - prevent Git backup on Railway
+        if IS_RAILWAY:
+            logger.warning("⚠️ Git backup disabled on Railway. Use API method instead.")
+            logger.info("Set BACKUP_METHOD=api in Railway environment variables.")
+            return
+        
         logger.info("Starting Git backup...")
         
         # Check if there are any changes to commit
@@ -896,9 +904,14 @@ def start_backup_system():
     if GITHUB_BACKUP_ENABLED:
         backup_thread = threading.Thread(target=backup_loop, daemon=True)
         backup_thread.start()
-        logger.info(f"🔄 Auto-backup system started (interval: {BACKUP_INTERVAL}s)")
+        method_name = "GitHub API" if BACKUP_METHOD == 'api' else "Git"
+        env_info = " (Railway detected)" if IS_RAILWAY else ""
+        logger.info(f"🔄 Auto-backup system started{env_info}")
+        logger.info(f"📊 Backup method: {method_name}, Interval: {BACKUP_INTERVAL}s")
         # Do initial backup
         backup_to_github()
+    else:
+        logger.info("⚠️ Backup system disabled (GITHUB_BACKUP_ENABLED=False)")
 # --- End GitHub Backup System ---
 
 # --- End Database Operations ---

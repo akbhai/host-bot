@@ -21,10 +21,10 @@
 ### 3️⃣ Set Variables (1 minute)
 Railway dashboard mein Variables tab:
 ```
-BACKUP_METHOD=api
 GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
 GITHUB_REPO=akbhai/host-bot
 ```
+**Note**: Railway automatically detect ho jayega, `BACKUP_METHOD` set karne ki zarurat nahi!
 
 ## ✅ Done!
 

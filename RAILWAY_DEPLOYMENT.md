@@ -30,12 +30,14 @@ Railway dashboard mein:
 3. Ye variables add karo:
 
 ```
-BACKUP_METHOD=api
 GITHUB_TOKEN=ghp_your_token_here_paste_karo
 GITHUB_REPO=akbhai/host-bot
 ```
 
-**Important**: `GITHUB_TOKEN` mein apna actual token paste karo jo Step 1 mein banaya tha!
+**Important Notes**: 
+- `GITHUB_TOKEN` mein apna actual token paste karo jo Step 1 mein banaya tha!
+- `BACKUP_METHOD` set karne ki zarurat NAHI hai - Railway automatically detect ho jayega
+- Variables add karne ke baad **manually restart karo** (Settings → Restart)
 
 ### Step 4: Deploy Karo
 
