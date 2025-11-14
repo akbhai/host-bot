@@ -48,6 +48,13 @@ TOKEN = '8447957070:AAEHCjb6OytoMjHONaapOkSgJ7Wcp1Qt8aI' # Replace with your act
 OWNER_ID = 562735329 # Replace with your Owner ID
 ADMIN_ID = 562735329 # Replace with your Admin ID (can be same as Owner)
 YOUR_USERNAME = '@akbhai007' # Replace with your Telegram username (without the @)
+
+# Backup Configuration
+BACKUP_INTERVAL = 3600  # Backup every 1 hour (in seconds)
+GITHUB_BACKUP_ENABLED = True  # Set to False to disable auto-backup
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')  # GitHub Personal Access Token
+GITHUB_REPO = os.environ.get('GITHUB_REPO', 'akbhai/host-bot')  # Format: username/repo
+BACKUP_METHOD = os.environ.get('BACKUP_METHOD', 'git')  # 'git' or 'api'
 UPDATE_CHANNEL = 'https://t.me/+Y2QWCIycJPplMDE1' # Replace with your update channel link
 
 # Folder setup - using absolute paths
@@ -782,6 +789,118 @@ def remove_admin_db(admin_id):
         except sqlite3.Error as e: logger.error(f"❌ SQLite error removing admin {admin_id}: {e}"); return False
         except Exception as e: logger.error(f"❌ Unexpected error removing admin {admin_id}: {e}", exc_info=True); return False
         finally: conn.close()
+
+# --- GitHub Backup System ---
+def backup_to_github():
+    """Backup database and user data to GitHub"""
+    if BACKUP_METHOD == 'api':
+        backup_via_github_api()
+    else:
+        backup_via_git()
+
+def backup_via_git():
+    """Backup using Git commands (for local/VPS hosting)"""
+    try:
+        logger.info("Starting Git backup...")
+        
+        # Check if there are any changes to commit
+        status_result = subprocess.run(['git', 'status', '--porcelain'], 
+                                      capture_output=True, text=True, cwd=BASE_DIR)
+        
+        if not status_result.stdout.strip():
+            logger.info("No changes to backup")
+            return
+        
+        # Add all data files
+        subprocess.run(['git', 'add', 'inf/'], cwd=BASE_DIR, check=False)
+        subprocess.run(['git', 'add', 'upload_bots/'], cwd=BASE_DIR, check=False)
+        
+        # Create commit with timestamp
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        commit_msg = f"Auto-backup: {timestamp}"
+        
+        commit_result = subprocess.run(['git', 'commit', '-m', commit_msg], 
+                                      capture_output=True, text=True, cwd=BASE_DIR)
+        
+        if commit_result.returncode == 0:
+            # Push to GitHub
+            push_result = subprocess.run(['git', 'push', 'origin', 'HEAD'], 
+                                        capture_output=True, text=True, cwd=BASE_DIR)
+            
+            if push_result.returncode == 0:
+                logger.info(f"✅ Backup successful: {commit_msg}")
+            else:
+                logger.error(f"❌ Push failed: {push_result.stderr}")
+        else:
+            logger.info(f"Commit result: {commit_result.stdout}")
+            
+    except Exception as e:
+        logger.error(f"❌ Backup error: {e}", exc_info=True)
+
+def backup_via_github_api():
+    """Backup using GitHub API (for Railway/Heroku hosting)"""
+    try:
+        logger.info("Starting GitHub API backup...")
+        
+        if not GITHUB_TOKEN:
+            logger.error("❌ GITHUB_TOKEN not set. Cannot backup via API.")
+            return
+        
+        import base64
+        
+        # Backup database file
+        db_path = DATABASE_PATH
+        if os.path.exists(db_path):
+            with open(db_path, 'rb') as f:
+                db_content = base64.b64encode(f.read()).decode('utf-8')
+            
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # GitHub API endpoint
+            api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/backups/bot_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+            
+            headers = {
+                'Authorization': f'token {GITHUB_TOKEN}',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+            
+            data = {
+                'message': f'Auto-backup: {timestamp}',
+                'content': db_content,
+                'branch': 'main'
+            }
+            
+            response = requests.put(api_url, headers=headers, json=data)
+            
+            if response.status_code in [200, 201]:
+                logger.info(f"✅ Database backup successful via API: {timestamp}")
+            else:
+                logger.error(f"❌ API backup failed: {response.status_code} - {response.text}")
+        else:
+            logger.warning("⚠️ Database file not found for backup")
+            
+    except Exception as e:
+        logger.error(f"❌ API Backup error: {e}", exc_info=True)
+
+def backup_loop():
+    """Background thread for periodic backups"""
+    while GITHUB_BACKUP_ENABLED:
+        try:
+            time.sleep(BACKUP_INTERVAL)
+            backup_to_github()
+        except Exception as e:
+            logger.error(f"❌ Backup loop error: {e}", exc_info=True)
+
+def start_backup_system():
+    """Start the automatic backup system"""
+    if GITHUB_BACKUP_ENABLED:
+        backup_thread = threading.Thread(target=backup_loop, daemon=True)
+        backup_thread.start()
+        logger.info(f"🔄 Auto-backup system started (interval: {BACKUP_INTERVAL}s)")
+        # Do initial backup
+        backup_to_github()
+# --- End GitHub Backup System ---
+
 # --- End Database Operations ---
 
 # --- Menu creation (Inline and ReplyKeyboards) ---
@@ -857,6 +976,7 @@ def create_admin_panel():
         types.InlineKeyboardButton('➖ Remove Admin', callback_data='remove_admin')
     )
     markup.row(types.InlineKeyboardButton('📋 List Admins', callback_data='list_admins'))
+    markup.row(types.InlineKeyboardButton('💾 Backup to GitHub', callback_data='manual_backup'))
     markup.row(types.InlineKeyboardButton('🔙 Back to Main', callback_data='back_to_main'))
     return markup
 
@@ -1191,6 +1311,19 @@ def _logic_admin_panel(message):
     bot.reply_to(message, "👑 Admin Panel\nManage admins. Use inline buttons from /start or admin menu.",
                  reply_markup=create_admin_panel())
 
+def _logic_manual_backup(message):
+    if message.from_user.id not in admin_ids:
+        bot.reply_to(message, "⚠️ Admin permissions required.")
+        return
+    
+    bot.reply_to(message, "🔄 Starting manual backup to GitHub...")
+    try:
+        backup_to_github()
+        bot.send_message(message.chat.id, "✅ Backup completed successfully!")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Backup failed: {str(e)}")
+        logger.error(f"Manual backup failed: {e}", exc_info=True)
+
 def _logic_run_all_scripts(message_or_call):
     if isinstance(message_or_call, telebot.types.Message):
         admin_user_id = message_or_call.from_user.id
@@ -1319,6 +1452,8 @@ def command_lock_bot(message): _logic_toggle_lock_bot(message)
 def command_admin_panel(message): _logic_admin_panel(message)
 @bot.message_handler(commands=['runningallcode']) # Added
 def command_run_all_code(message): _logic_run_all_scripts(message)
+@bot.message_handler(commands=['backup'])
+def command_backup(message): _logic_manual_backup(message)
 
 
 @bot.message_handler(commands=['ping'])
@@ -1427,6 +1562,7 @@ def handle_callbacks(call):
         elif data == 'add_admin': owner_required_callback(call, add_admin_init_callback) 
         elif data == 'remove_admin': owner_required_callback(call, remove_admin_init_callback) 
         elif data == 'list_admins': admin_required_callback(call, list_admins_callback)
+        elif data == 'manual_backup': admin_required_callback(call, manual_backup_callback)
         elif data == 'add_subscription': admin_required_callback(call, add_subscription_init_callback) 
         elif data == 'remove_subscription': admin_required_callback(call, remove_subscription_init_callback) 
         elif data == 'check_subscription': admin_required_callback(call, check_subscription_init_callback) 
@@ -2104,6 +2240,21 @@ def list_admins_callback(call):
                               call.message.message_id, reply_markup=create_admin_panel(), parse_mode='Markdown')
     except Exception as e: logger.error(f"Error listing admins: {e}")
 
+def manual_backup_callback(call):
+    if call.from_user.id not in admin_ids:
+        bot.answer_callback_query(call.id, "⚠️ Admin permissions required.", show_alert=True)
+        return
+    
+    bot.answer_callback_query(call.id, "🔄 Starting backup...")
+    bot.send_message(call.message.chat.id, "🔄 Starting manual backup to GitHub...")
+    
+    try:
+        backup_to_github()
+        bot.send_message(call.message.chat.id, "✅ Backup completed successfully!")
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"❌ Backup failed: {str(e)}")
+        logger.error(f"Manual backup failed: {e}", exc_info=True)
+
 def add_subscription_init_callback(call):
     bot.answer_callback_query(call.id)
     msg = bot.send_message(call.message.chat.id, "💳 Enter User ID & days (e.g., `12345678 30`).\n/cancel to abort.")
@@ -2209,6 +2360,7 @@ if __name__ == '__main__':
                 f"🔧 Base Dir: {BASE_DIR}\n📁 Upload Dir: {UPLOAD_BOTS_DIR}\n" +
                 f"📊 Data Dir: {IROTECH_DIR}\n🔑 Owner ID: {OWNER_ID}\n🛡️ Admins: {admin_ids}\n" + "="*40)
     keep_alive()
+    start_backup_system()
     logger.info("🚀 Starting polling...")
     while True:
         try:
