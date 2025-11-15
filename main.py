@@ -1145,14 +1145,18 @@ def create_control_buttons(script_owner_id, file_name, is_running=True): # Param
     markup.add(types.InlineKeyboardButton("🔙 Back to Files", callback_data='check_files'))
     return markup
 
-def create_admin_panel():
+def create_admin_panel(user_id=None):
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.row(
         types.InlineKeyboardButton('➕ Add Admin', callback_data='add_admin'),
         types.InlineKeyboardButton('➖ Remove Admin', callback_data='remove_admin')
     )
     markup.row(types.InlineKeyboardButton('📋 List Admins', callback_data='list_admins'))
-    markup.row(types.InlineKeyboardButton('💾 Backup to GitHub', callback_data='manual_backup'))
+    
+    # Backup button only for owner
+    if user_id == OWNER_ID:
+        markup.row(types.InlineKeyboardButton('💾 My Backup', callback_data='owner_backup'))
+    
     markup.row(types.InlineKeyboardButton('🔙 Back to Main', callback_data='back_to_main'))
     return markup
 
@@ -1485,7 +1489,7 @@ def _logic_admin_panel(message):
         bot.reply_to(message, "⚠️ Admin permissions required.")
         return
     bot.reply_to(message, "👑 Admin Panel\nManage admins. Use inline buttons from /start or admin menu.",
-                 reply_markup=create_admin_panel())
+                 reply_markup=create_admin_panel(message.from_user.id))
 
 def _logic_manual_backup(message):
     user_id = message.from_user.id
@@ -1750,7 +1754,7 @@ def handle_callbacks(call):
         elif data == 'add_admin': owner_required_callback(call, add_admin_init_callback) 
         elif data == 'remove_admin': owner_required_callback(call, remove_admin_init_callback) 
         elif data == 'list_admins': admin_required_callback(call, list_admins_callback)
-        elif data == 'manual_backup': admin_required_callback(call, manual_backup_callback)
+        elif data == 'owner_backup': owner_backup_callback(call)
         elif data == 'add_subscription': admin_required_callback(call, add_subscription_init_callback) 
         elif data == 'remove_subscription': admin_required_callback(call, remove_subscription_init_callback) 
         elif data == 'check_subscription': admin_required_callback(call, check_subscription_init_callback) 
@@ -2377,7 +2381,7 @@ def admin_panel_callback(call):
     bot.answer_callback_query(call.id)
     try:
         bot.edit_message_text("👑 Admin Panel\nManage admins (Owner actions may be restricted).",
-                              call.message.chat.id, call.message.message_id, reply_markup=create_admin_panel())
+                              call.message.chat.id, call.message.message_id, reply_markup=create_admin_panel(call.from_user.id))
     except Exception as e: logger.error(f"Error showing admin panel: {e}")
 
 def add_admin_init_callback(call):
@@ -2437,24 +2441,26 @@ def list_admins_callback(call):
         admin_list_str = "\n".join(f"- `{aid}` {'(Owner)' if aid == OWNER_ID else ''}" for aid in sorted(list(admin_ids)))
         if not admin_list_str: admin_list_str = "(No Owner/Admins configured!)"
         bot.edit_message_text(f"👑 Current Admins:\n\n{admin_list_str}", call.message.chat.id,
-                              call.message.message_id, reply_markup=create_admin_panel(), parse_mode='Markdown')
+                              call.message.message_id, reply_markup=create_admin_panel(call.from_user.id), parse_mode='Markdown')
     except Exception as e: logger.error(f"Error listing admins: {e}")
 
-def manual_backup_callback(call):
-    if call.from_user.id not in admin_ids:
-        bot.answer_callback_query(call.id, "⚠️ Admin permissions required.", show_alert=True)
+def owner_backup_callback(call):
+    """Owner-only backup - backs up only owner's files"""
+    if call.from_user.id != OWNER_ID:
+        bot.answer_callback_query(call.id, "⚠️ Owner permissions required.", show_alert=True)
         return
     
-    backup_method = "Telegram" if IS_RAILWAY else "GitHub"
-    bot.answer_callback_query(call.id, "🔄 Starting backup...")
-    bot.send_message(call.message.chat.id, f"🔄 Starting backup for all users via {backup_method}...")
+    bot.answer_callback_query(call.id, "🔄 Creating your backup...")
+    bot.send_message(call.message.chat.id, "🔄 Creating backup of your bot files...")
     
     try:
-        backup_to_github()  # This automatically uses Telegram on Railway
-        bot.send_message(call.message.chat.id, f"✅ Backup completed! All users will receive their files.")
+        if backup_user_data(OWNER_ID):
+            bot.send_message(call.message.chat.id, "✅ Your backup is ready! Check messages above.")
+        else:
+            bot.send_message(call.message.chat.id, "⚠️ No files found to backup.")
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Backup failed: {str(e)}")
-        logger.error(f"Manual backup failed: {e}", exc_info=True)
+        logger.error(f"Owner backup failed: {e}", exc_info=True)
 
 def add_subscription_init_callback(call):
     bot.answer_callback_query(call.id)
