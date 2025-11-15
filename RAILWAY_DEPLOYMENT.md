@@ -26,25 +26,30 @@
 Railway pe bot run hone ke baad:
 
 1. **Har 1 ghante mein** automatic backup hoga
-2. **Database file Telegram pe aayegi** (Owner ko)
-3. File name: `bot_data_YYYYMMDD_HHMMSS.db`
+2. **Har user ko apna backup Telegram pe aayega**
+3. File name: `backup_USER_ID_YYYYMMDD_HHMMSS.zip`
 4. Caption mein stats dikhenge:
-   - Total users
-   - Active subscriptions
-   - Uploaded files count
+   - User ki files count
+   - Running/stopped bots status
+   - File list
 
 ### Manual Backup
 
+User commands:
+- `/backup` - Instant backup trigger karo
+- "💾 My Backup" button click karo
+
 Admin commands:
-- `/backup` - Instant backup trigger karo (Telegram pe aayegi)
+- `/backup` - Sabhi users ko backup trigger karo
 - Admin Panel → "💾 Backup to GitHub" button
 
 ### Backup Files Kaha Milenge?
 
-**Railway pe**: Telegram pe Owner ko file aayegi
+**Railway pe**: Telegram pe har user ko apni file aayegi
 - Apne Telegram pe bot se message check karo
 - Har 1 ghante mein naya backup file aayega
-- File download karke safe rakho
+- ZIP file download karke safe rakho
+- Admin ko koi separate backup nahi aayega (sirf users ko)
 
 ## 🔧 Configuration Options
 
@@ -86,7 +91,10 @@ Backup logs dikhenge:
 🔄 Auto-backup system started (Railway detected - using Telegram to prevent redeploy loop)
 📊 Backup method: Telegram (to Owner), Interval: 3600s
 Starting Telegram backup...
-✅ Database backup sent to owner via Telegram: 2024-11-15 09:30:00
+Found 5 user folders to backup
+✅ User 123456789 backup sent via Telegram (3 files)
+✅ User 987654321 backup sent via Telegram (5 files)
+✅ Backed up 5 user folders, skipped 0 empty folders
 ```
 
 ## 🔍 Troubleshooting

@@ -965,29 +965,7 @@ def backup_via_telegram():
     try:
         logger.info("Starting Telegram backup...")
         
-        # 1. Backup main database to owner
-        db_path = DATABASE_PATH
-        if os.path.exists(db_path):
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            file_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            
-            # Send database file to owner via Telegram
-            with open(db_path, 'rb') as f:
-                caption = f"🔄 Host Bot Auto-backup: {timestamp}\n\n"
-                caption += f"📊 Total Users: {len(active_users)}\n"
-                caption += f"💳 Subscriptions: {len(user_subscriptions)}\n"
-                caption += f"📁 Total files: {sum(len(files) for files in user_files.values())}"
-                
-                bot.send_document(
-                    OWNER_ID,
-                    f,
-                    caption=caption,
-                    visible_file_name=f"host_bot_data_{file_timestamp}.db"
-                )
-            
-            logger.info(f"✅ Main database backup sent to owner: {timestamp}")
-        
-        # 2. Backup each user's bot data to them
+        # Backup each user's bot data to them (no host bot database backup)
         # Scan ALL user folders (not just database entries)
         backed_up_users = 0
         skipped_users = 0
@@ -1512,13 +1490,13 @@ def _logic_admin_panel(message):
 def _logic_manual_backup(message):
     user_id = message.from_user.id
     
-    # Admin backup - full system backup
+    # Admin backup - triggers all users' backups
     if user_id in admin_ids:
         backup_method = "Telegram" if IS_RAILWAY else "GitHub"
-        bot.reply_to(message, f"🔄 Starting full system backup via {backup_method}...")
+        bot.reply_to(message, f"🔄 Starting backup for all users via {backup_method}...")
         try:
             backup_to_github()  # This automatically uses Telegram on Railway
-            bot.send_message(message.chat.id, f"✅ Full backup completed! Check your Telegram for files.")
+            bot.send_message(message.chat.id, f"✅ Backup completed! All users will receive their files.")
         except Exception as e:
             bot.send_message(message.chat.id, f"❌ Backup failed: {str(e)}")
             logger.error(f"Manual backup failed: {e}", exc_info=True)
@@ -2469,11 +2447,11 @@ def manual_backup_callback(call):
     
     backup_method = "Telegram" if IS_RAILWAY else "GitHub"
     bot.answer_callback_query(call.id, "🔄 Starting backup...")
-    bot.send_message(call.message.chat.id, f"🔄 Starting manual backup via {backup_method}...")
+    bot.send_message(call.message.chat.id, f"🔄 Starting backup for all users via {backup_method}...")
     
     try:
         backup_to_github()  # This automatically uses Telegram on Railway
-        bot.send_message(call.message.chat.id, f"✅ Backup completed! Check your Telegram for files.")
+        bot.send_message(call.message.chat.id, f"✅ Backup completed! All users will receive their files.")
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Backup failed: {str(e)}")
         logger.error(f"Manual backup failed: {e}", exc_info=True)
