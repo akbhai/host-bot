@@ -98,7 +98,7 @@ logger = logging.getLogger(__name__)
 COMMAND_BUTTONS_LAYOUT_USER_SPEC = [
     ["📢 Updates Channel"],
     ["📤 Upload File", "📂 Check Files"],
-    ["⚡ Bot Speed", "📊 Statistics"], # Statistics button kept for users, logic will restrict if not admin
+    ["⚡ Bot Speed", "💾 My Backup"],
     ["📞 Contact Owner"]
 ]
 ADMIN_COMMAND_BUTTONS_LAYOUT_USER_SPEC = [
@@ -792,10 +792,13 @@ def remove_admin_db(admin_id):
         except Exception as e: logger.error(f"❌ Unexpected error removing admin {admin_id}: {e}", exc_info=True); return False
         finally: conn.close()
 
-# --- GitHub Backup System ---
+# --- Backup System ---
 def backup_to_github():
-    """Backup database and user data to GitHub"""
-    if BACKUP_METHOD == 'api':
+    """Backup database and user data"""
+    if IS_RAILWAY:
+        # Railway pe Telegram backup use karo (GitHub backup se redeploy hota hai)
+        backup_via_telegram()
+    elif BACKUP_METHOD == 'api':
         backup_via_github_api()
     else:
         backup_via_git()
@@ -845,8 +848,102 @@ def backup_via_git():
     except Exception as e:
         logger.error(f"❌ Backup error: {e}", exc_info=True)
 
+def backup_user_data(user_id):
+    """Backup individual user's bot data to their Telegram"""
+    try:
+        user_folder = get_user_folder(user_id)
+        
+        # Check if user has any files
+        if not os.path.exists(user_folder) or not os.listdir(user_folder):
+            return
+        
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        file_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Create zip of user's folder
+        zip_filename = f"backup_{user_id}_{file_timestamp}.zip"
+        zip_path = os.path.join(tempfile.gettempdir(), zip_filename)
+        
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(user_folder):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, user_folder)
+                    zipf.write(file_path, arcname)
+        
+        # Get user's file info
+        user_file_list = user_files.get(user_id, [])
+        file_count = len(user_file_list)
+        
+        # Send backup to user
+        with open(zip_path, 'rb') as f:
+            caption = f"🔄 Auto-backup: {timestamp}\n\n"
+            caption += f"📁 Your hosted files: {file_count}\n"
+            caption += f"💾 Backup includes all your bot files\n\n"
+            caption += "Files:\n"
+            for fname, ftype in user_file_list[:5]:  # Show first 5 files
+                caption += f"• {fname} ({ftype})\n"
+            if file_count > 5:
+                caption += f"... and {file_count - 5} more files"
+            
+            bot.send_document(
+                user_id,
+                f,
+                caption=caption,
+                visible_file_name=zip_filename
+            )
+        
+        # Clean up temp zip
+        os.remove(zip_path)
+        logger.info(f"✅ User {user_id} backup sent via Telegram")
+        
+    except Exception as e:
+        logger.error(f"❌ User {user_id} backup error: {e}", exc_info=True)
+
+def backup_via_telegram():
+    """Backup using Telegram (for Railway - prevents redeploy loop)"""
+    try:
+        logger.info("Starting Telegram backup...")
+        
+        # 1. Backup main database to owner
+        db_path = DATABASE_PATH
+        if os.path.exists(db_path):
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            file_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            
+            # Send database file to owner via Telegram
+            with open(db_path, 'rb') as f:
+                caption = f"🔄 Host Bot Auto-backup: {timestamp}\n\n"
+                caption += f"📊 Total Users: {len(active_users)}\n"
+                caption += f"💳 Subscriptions: {len(user_subscriptions)}\n"
+                caption += f"📁 Total files: {sum(len(files) for files in user_files.values())}"
+                
+                bot.send_document(
+                    OWNER_ID,
+                    f,
+                    caption=caption,
+                    visible_file_name=f"host_bot_data_{file_timestamp}.db"
+                )
+            
+            logger.info(f"✅ Main database backup sent to owner: {timestamp}")
+        
+        # 2. Backup each user's bot data to them
+        backed_up_users = 0
+        for user_id in list(user_files.keys()):
+            try:
+                backup_user_data(user_id)
+                backed_up_users += 1
+                time.sleep(1)  # Avoid Telegram rate limits
+            except Exception as e:
+                logger.error(f"Failed to backup user {user_id}: {e}")
+        
+        logger.info(f"✅ Backed up {backed_up_users} user bot folders")
+            
+    except Exception as e:
+        logger.error(f"❌ Telegram Backup error: {e}", exc_info=True)
+
 def backup_via_github_api():
-    """Backup using GitHub API (for Railway/Heroku hosting)"""
+    """Backup using GitHub API (for VPS hosting with separate backup repo)"""
     try:
         logger.info("Starting GitHub API backup...")
         
@@ -904,15 +1001,24 @@ def start_backup_system():
     if GITHUB_BACKUP_ENABLED:
         backup_thread = threading.Thread(target=backup_loop, daemon=True)
         backup_thread.start()
-        method_name = "GitHub API" if BACKUP_METHOD == 'api' else "Git"
-        env_info = " (Railway detected)" if IS_RAILWAY else ""
+        
+        if IS_RAILWAY:
+            method_name = "Telegram (to Owner)"
+            env_info = " (Railway detected - using Telegram to prevent redeploy loop)"
+        elif BACKUP_METHOD == 'api':
+            method_name = "GitHub API"
+            env_info = ""
+        else:
+            method_name = "Git"
+            env_info = ""
+            
         logger.info(f"🔄 Auto-backup system started{env_info}")
         logger.info(f"📊 Backup method: {method_name}, Interval: {BACKUP_INTERVAL}s")
         # Do initial backup
         backup_to_github()
     else:
         logger.info("⚠️ Backup system disabled (GITHUB_BACKUP_ENABLED=False)")
-# --- End GitHub Backup System ---
+# --- End Backup System ---
 
 # --- End Database Operations ---
 
@@ -947,8 +1053,7 @@ def create_main_menu_inline(user_id):
     else:
         markup.add(buttons[0])
         markup.add(buttons[1], buttons[2])
-        markup.add(buttons[3])
-        markup.add(types.InlineKeyboardButton('📊 Statistics', callback_data='stats')) # Allow non-admins to see stats too
+        markup.add(buttons[3], types.InlineKeyboardButton('💾 My Backup', callback_data='my_backup'))
         markup.add(buttons[4])
     return markup
 
@@ -1325,17 +1430,26 @@ def _logic_admin_panel(message):
                  reply_markup=create_admin_panel())
 
 def _logic_manual_backup(message):
-    if message.from_user.id not in admin_ids:
-        bot.reply_to(message, "⚠️ Admin permissions required.")
-        return
+    user_id = message.from_user.id
     
-    bot.reply_to(message, "🔄 Starting manual backup to GitHub...")
-    try:
-        backup_to_github()
-        bot.send_message(message.chat.id, "✅ Backup completed successfully!")
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Backup failed: {str(e)}")
-        logger.error(f"Manual backup failed: {e}", exc_info=True)
+    # Admin backup - full system backup
+    if user_id in admin_ids:
+        bot.reply_to(message, "🔄 Starting full system backup...")
+        try:
+            backup_to_github()
+            bot.send_message(message.chat.id, "✅ Full backup completed! Check your Telegram.")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Backup failed: {str(e)}")
+            logger.error(f"Manual backup failed: {e}", exc_info=True)
+    else:
+        # User backup - only their bot data
+        bot.reply_to(message, "🔄 Creating backup of your bot files...")
+        try:
+            backup_user_data(user_id)
+            bot.send_message(message.chat.id, "✅ Your backup is ready! Check messages above.")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Backup failed: {str(e)}")
+            logger.error(f"User {user_id} manual backup failed: {e}", exc_info=True)
 
 def _logic_run_all_scripts(message_or_call):
     if isinstance(message_or_call, telebot.types.Message):
@@ -1425,6 +1539,7 @@ BUTTON_TEXT_TO_LOGIC = {
     "📤 Upload File": _logic_upload_file,
     "📂 Check Files": _logic_check_files,
     "⚡ Bot Speed": _logic_bot_speed,
+    "💾 My Backup": _logic_manual_backup,
     "📞 Contact Owner": _logic_contact_owner,
     "📊 Statistics": _logic_statistics, 
     "💳 Subscriptions": _logic_subscriptions_panel,
@@ -1560,6 +1675,7 @@ def handle_callbacks(call):
         elif data.startswith('delete_'): delete_bot_callback(call)
         elif data.startswith('logs_'): logs_bot_callback(call)
         elif data == 'speed': speed_callback(call)
+        elif data == 'my_backup': my_backup_callback(call)
         elif data == 'back_to_main': back_to_main_callback(call)
         elif data.startswith('confirm_broadcast_'): handle_confirm_broadcast(call)
         elif data == 'cancel_broadcast': handle_cancel_broadcast(call)
@@ -1991,6 +2107,18 @@ def speed_callback(call):
          bot.answer_callback_query(call.id, "Error in speed test.", show_alert=True)
          try: bot.edit_message_text("〽️ Main Menu", chat_id, call.message.message_id, reply_markup=create_main_menu_inline(user_id))
          except Exception: pass
+
+def my_backup_callback(call):
+    user_id = call.from_user.id
+    bot.answer_callback_query(call.id, "🔄 Creating your backup...")
+    bot.send_message(call.message.chat.id, "🔄 Creating backup of your bot files...")
+    
+    try:
+        backup_user_data(user_id)
+        bot.send_message(call.message.chat.id, "✅ Your backup is ready! Check messages above.")
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"❌ Backup failed: {str(e)}")
+        logger.error(f"User {user_id} backup callback failed: {e}", exc_info=True)
 
 def back_to_main_callback(call):
     user_id = call.from_user.id

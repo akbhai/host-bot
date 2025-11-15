@@ -1,16 +1,8 @@
 # ⚡ Quick Setup Guide - Railway
 
-## 3 Simple Steps
+## 2 Simple Steps (Seriously!)
 
-### 1️⃣ GitHub Token (2 minutes)
-```
-1. https://github.com/settings/tokens
-2. "Generate new token (classic)"
-3. ✅ Check: repo
-4. Copy token → Save somewhere safe
-```
-
-### 2️⃣ Railway Deploy (1 minute)
+### 1️⃣ Railway Deploy (1 minute)
 ```
 1. https://railway.app
 2. New Project → GitHub repo
@@ -18,32 +10,32 @@
 4. Wait for deploy
 ```
 
-### 3️⃣ Set Variables (1 minute)
-Railway dashboard mein Variables tab:
+### 2️⃣ Done! 🎉
 ```
-GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
-GITHUB_REPO=akbhai/host-bot
+Kuch aur karne ki zarurat nahi!
+No environment variables needed!
 ```
-**Note**: Railway automatically detect ho jayega, `BACKUP_METHOD` set karne ki zarurat nahi!
 
-## ✅ Done!
+## ✅ Bot Ready!
 
 Bot ab:
 - ✅ Railway pe run ho raha hai
 - ✅ Har 1 ghante mein automatic backup
-- ✅ GitHub pe data safe
+- ✅ **Telegram pe backup file aayegi** (Owner ko)
 
 ## 🔍 Check Karo
 
-**Logs dekho:**
+**Logs dekho (Railway dashboard):**
 ```
-🔄 Auto-backup system started (interval: 3600s)
-✅ Database backup successful via API
+🔄 Auto-backup system started (Railway detected)
+📊 Backup method: Telegram (to Owner)
+✅ Database backup sent to owner via Telegram
 ```
 
-**GitHub pe dekho:**
+**Telegram pe dekho:**
 ```
-https://github.com/akbhai/host-bot/tree/main/backups
+Bot se message aayega with database file
+File name: bot_data_20241115_093000.db
 ```
 
 ## 📱 Bot Use Karo
