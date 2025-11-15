@@ -54,9 +54,14 @@ BACKUP_INTERVAL = 3600  # Backup every 1 hour (in seconds)
 GITHUB_BACKUP_ENABLED = os.environ.get('GITHUB_BACKUP_ENABLED', 'True').lower() == 'true'
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')  # GitHub Personal Access Token
 GITHUB_REPO = os.environ.get('GITHUB_REPO', 'akbhai/host-bot')  # Format: username/repo
-# Auto-detect Railway environment
-IS_RAILWAY = os.environ.get('RAILWAY_ENVIRONMENT') is not None or os.environ.get('RAILWAY_STATIC_URL') is not None
-BACKUP_METHOD = os.environ.get('BACKUP_METHOD', 'api' if IS_RAILWAY else 'git')  # Auto-detect
+# Auto-detect Railway environment (multiple checks for reliability)
+IS_RAILWAY = (
+    os.environ.get('RAILWAY_ENVIRONMENT') is not None or 
+    os.environ.get('RAILWAY_STATIC_URL') is not None or
+    os.environ.get('RAILWAY_PROJECT_ID') is not None or
+    os.environ.get('RAILWAY_SERVICE_ID') is not None
+)
+BACKUP_METHOD = os.environ.get('BACKUP_METHOD', 'telegram' if IS_RAILWAY else 'git')  # Auto-detect
 UPDATE_CHANNEL = 'https://t.me/+Y2QWCIycJPplMDE1' # Replace with your update channel link
 
 # Folder setup - using absolute paths
@@ -795,12 +800,17 @@ def remove_admin_db(admin_id):
 # --- Backup System ---
 def backup_to_github():
     """Backup database and user data"""
-    if IS_RAILWAY:
-        # Railway pe Telegram backup use karo (GitHub backup se redeploy hota hai)
+    logger.info(f"Backup triggered - IS_RAILWAY: {IS_RAILWAY}, BACKUP_METHOD: {BACKUP_METHOD}")
+    
+    # Force Telegram backup on Railway to prevent redeploy loop
+    if IS_RAILWAY or BACKUP_METHOD == 'telegram':
+        logger.info("Using Telegram backup (Railway environment or telegram method)")
         backup_via_telegram()
     elif BACKUP_METHOD == 'api':
+        logger.info("Using GitHub API backup")
         backup_via_github_api()
     else:
+        logger.info("Using Git backup")
         backup_via_git()
 
 def backup_via_git():
@@ -945,6 +955,12 @@ def backup_via_telegram():
 def backup_via_github_api():
     """Backup using GitHub API (for VPS hosting with separate backup repo)"""
     try:
+        # Safety check - should not be called on Railway
+        if IS_RAILWAY:
+            logger.warning("⚠️ GitHub API backup called on Railway! Using Telegram instead.")
+            backup_via_telegram()
+            return
+        
         logger.info("Starting GitHub API backup...")
         
         if not GITHUB_TOKEN:
@@ -1434,10 +1450,11 @@ def _logic_manual_backup(message):
     
     # Admin backup - full system backup
     if user_id in admin_ids:
-        bot.reply_to(message, "🔄 Starting full system backup...")
+        backup_method = "Telegram" if IS_RAILWAY else "GitHub"
+        bot.reply_to(message, f"🔄 Starting full system backup via {backup_method}...")
         try:
-            backup_to_github()
-            bot.send_message(message.chat.id, "✅ Full backup completed! Check your Telegram.")
+            backup_to_github()  # This automatically uses Telegram on Railway
+            bot.send_message(message.chat.id, f"✅ Full backup completed! Check your Telegram for files.")
         except Exception as e:
             bot.send_message(message.chat.id, f"❌ Backup failed: {str(e)}")
             logger.error(f"Manual backup failed: {e}", exc_info=True)
@@ -2386,12 +2403,13 @@ def manual_backup_callback(call):
         bot.answer_callback_query(call.id, "⚠️ Admin permissions required.", show_alert=True)
         return
     
+    backup_method = "Telegram" if IS_RAILWAY else "GitHub"
     bot.answer_callback_query(call.id, "🔄 Starting backup...")
-    bot.send_message(call.message.chat.id, "🔄 Starting manual backup to GitHub...")
+    bot.send_message(call.message.chat.id, f"🔄 Starting manual backup via {backup_method}...")
     
     try:
-        backup_to_github()
-        bot.send_message(call.message.chat.id, "✅ Backup completed successfully!")
+        backup_to_github()  # This automatically uses Telegram on Railway
+        bot.send_message(call.message.chat.id, f"✅ Backup completed! Check your Telegram for files.")
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Backup failed: {str(e)}")
         logger.error(f"Manual backup failed: {e}", exc_info=True)
