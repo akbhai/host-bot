@@ -858,14 +858,30 @@ def backup_via_git():
     except Exception as e:
         logger.error(f"❌ Backup error: {e}", exc_info=True)
 
-def backup_user_data(user_id):
-    """Backup individual user's bot data to their Telegram"""
+def backup_user_data(user_id, silent=False):
+    """Backup individual user's bot data to their Telegram
+    
+    Args:
+        user_id: User's Telegram ID
+        silent: If True, don't send notification (for deleted/stopped bots)
+    """
     try:
         user_folder = get_user_folder(user_id)
         
         # Check if user has any files
-        if not os.path.exists(user_folder) or not os.listdir(user_folder):
-            return
+        if not os.path.exists(user_folder):
+            logger.info(f"No folder found for user {user_id}")
+            return False
+            
+        # Get all files in folder (even if bot is stopped/deleted)
+        all_files = []
+        for root, dirs, files in os.walk(user_folder):
+            for file in files:
+                all_files.append(file)
+        
+        if not all_files:
+            logger.info(f"No files found for user {user_id}")
+            return False
         
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         file_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -881,21 +897,53 @@ def backup_user_data(user_id):
                     arcname = os.path.relpath(file_path, user_folder)
                     zipf.write(file_path, arcname)
         
-        # Get user's file info
+        # Get user's file info from database (if exists)
         user_file_list = user_files.get(user_id, [])
-        file_count = len(user_file_list)
+        db_file_count = len(user_file_list)
+        actual_file_count = len(all_files)
+        
+        # Build caption
+        caption = f"🔄 Auto-backup: {timestamp}\n\n"
+        caption += f"📁 Files in backup: {actual_file_count}\n"
+        caption += f"💾 Includes all your uploaded files\n"
+        
+        # Check running bots
+        running_bots = 0
+        for fname, ftype in user_file_list:
+            if is_bot_running(user_id, fname):
+                running_bots += 1
+        
+        # Show status
+        if db_file_count > 0:
+            caption += f"📊 Registered files: {db_file_count}\n"
+            if running_bots > 0:
+                caption += f"🟢 Running bots: {running_bots}\n"
+            stopped_bots = db_file_count - running_bots
+            if stopped_bots > 0:
+                caption += f"⚫ Stopped bots: {stopped_bots}\n"
+        
+        caption += "\n📂 Files:\n"
+        
+        # Show files from database first with status
+        shown_files = set()
+        for fname, ftype in user_file_list[:5]:
+            status = "🟢" if is_bot_running(user_id, fname) else "⚫"
+            caption += f"{status} {fname} ({ftype})\n"
+            shown_files.add(fname)
+        
+        # Show additional files not in database
+        remaining = [f for f in all_files if f not in shown_files]
+        for fname in remaining[:5-len(shown_files)]:
+            caption += f"📄 {fname}\n"
+            shown_files.add(fname)
+        
+        if actual_file_count > len(shown_files):
+            caption += f"... and {actual_file_count - len(shown_files)} more files\n"
+        
+        caption += "\n💡 Tip: This backup includes ALL files, even stopped/deleted bots!"
         
         # Send backup to user
         with open(zip_path, 'rb') as f:
-            caption = f"🔄 Auto-backup: {timestamp}\n\n"
-            caption += f"📁 Your hosted files: {file_count}\n"
-            caption += f"💾 Backup includes all your bot files\n\n"
-            caption += "Files:\n"
-            for fname, ftype in user_file_list[:5]:  # Show first 5 files
-                caption += f"• {fname} ({ftype})\n"
-            if file_count > 5:
-                caption += f"... and {file_count - 5} more files"
-            
             bot.send_document(
                 user_id,
                 f,
@@ -905,10 +953,12 @@ def backup_user_data(user_id):
         
         # Clean up temp zip
         os.remove(zip_path)
-        logger.info(f"✅ User {user_id} backup sent via Telegram")
+        logger.info(f"✅ User {user_id} backup sent via Telegram ({actual_file_count} files)")
+        return True
         
     except Exception as e:
         logger.error(f"❌ User {user_id} backup error: {e}", exc_info=True)
+        return False
 
 def backup_via_telegram():
     """Backup using Telegram (for Railway - prevents redeploy loop)"""
@@ -938,16 +988,30 @@ def backup_via_telegram():
             logger.info(f"✅ Main database backup sent to owner: {timestamp}")
         
         # 2. Backup each user's bot data to them
+        # Scan ALL user folders (not just database entries)
         backed_up_users = 0
-        for user_id in list(user_files.keys()):
-            try:
-                backup_user_data(user_id)
-                backed_up_users += 1
-                time.sleep(1)  # Avoid Telegram rate limits
-            except Exception as e:
-                logger.error(f"Failed to backup user {user_id}: {e}")
+        skipped_users = 0
         
-        logger.info(f"✅ Backed up {backed_up_users} user bot folders")
+        if os.path.exists(UPLOAD_BOTS_DIR):
+            # Get all user folders
+            user_folders = [d for d in os.listdir(UPLOAD_BOTS_DIR) 
+                          if os.path.isdir(os.path.join(UPLOAD_BOTS_DIR, d)) and d.isdigit()]
+            
+            logger.info(f"Found {len(user_folders)} user folders to backup")
+            
+            for user_folder_name in user_folders:
+                try:
+                    user_id = int(user_folder_name)
+                    if backup_user_data(user_id):
+                        backed_up_users += 1
+                    else:
+                        skipped_users += 1
+                    time.sleep(1)  # Avoid Telegram rate limits
+                except Exception as e:
+                    logger.error(f"Failed to backup user {user_folder_name}: {e}")
+                    skipped_users += 1
+        
+        logger.info(f"✅ Backed up {backed_up_users} user folders, skipped {skipped_users} empty folders")
             
     except Exception as e:
         logger.error(f"❌ Telegram Backup error: {e}", exc_info=True)
