@@ -50,7 +50,7 @@ ADMIN_ID = 562735329 # Replace with your Admin ID (can be same as Owner)
 YOUR_USERNAME = '@akbhai007' # Replace with your Telegram username (without the @)
 
 # Backup Configuration
-BACKUP_INTERVAL = 3600  # Backup every 1 hour (in seconds)
+BACKUP_INTERVAL = 86400  # Backup every 24 hours (in seconds)
 GITHUB_BACKUP_ENABLED = os.environ.get('GITHUB_BACKUP_ENABLED', 'True').lower() == 'true'
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')  # GitHub Personal Access Token
 GITHUB_REPO = os.environ.get('GITHUB_REPO', 'akbhai/host-bot')  # Format: username/repo

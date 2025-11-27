@@ -10,10 +10,23 @@
 4. Apna `host-bot` repository select karo
 5. Railway automatically detect karega aur deploy karega
 
-### Step 2: Deploy Complete!
+### Step 2: Volume Setup (Data Persistence)
+
+**IMPORTANT**: Data persist karne ke liye volume setup karo:
+
+1. Railway Dashboard mein apne project pe jao
+2. **"Settings"** tab kholo
+3. **"Volumes"** section mein jao
+4. **"+ New Volume"** click karo
+5. Configure karo:
+   - **Mount Path**: `/app/upload_bots`
+   - Volume automatically create ho jayega
+
+### Step 3: Deploy Complete!
 
 **Bas itna hi!** Railway automatically:
 - ✅ Bot ko deploy karega
+- ✅ Data persist rahega (volume mein)
 - ✅ Backup system activate karega
 - ✅ Telegram pe backup bhejega (Owner ko)
 
@@ -25,7 +38,7 @@
 
 Railway pe bot run hone ke baad:
 
-1. **Har 1 ghante mein** automatic backup hoga
+1. **Har 24 ghante mein** automatic backup hoga
 2. **Har user ko apna backup Telegram pe aayega**
 3. File name: `backup_USER_ID_YYYYMMDD_HHMMSS.zip`
 4. Caption mein stats dikhenge:
@@ -45,9 +58,12 @@ Admin commands:
 
 ### Backup Files Kaha Milenge?
 
-**Railway pe**: Telegram pe har user ko apni file aayegi
+**Railway pe**: 
+- ✅ **Data persist rahega** (Volume mein stored)
+- ✅ Deploy/restart ke baad bhi data safe rahega
+- Telegram pe har user ko apni file aayegi
 - Apne Telegram pe bot se message check karo
-- Har 1 ghante mein naya backup file aayega
+- Har 24 ghante mein naya backup file aayega
 - ZIP file download karke safe rakho
 - Admin ko koi separate backup nahi aayega (sirf users ko)
 
@@ -62,10 +78,10 @@ BACKUP_INTERVAL = 3600  # 1 hour (seconds)
 
 Options:
 - `1800` = 30 minutes
-- `3600` = 1 hour (default)
+- `3600` = 1 hour
 - `7200` = 2 hours
 - `21600` = 6 hours
-- `86400` = 24 hours
+- `86400` = 24 hours (default)
 
 ### Backup Disable Karna
 
@@ -174,9 +190,11 @@ Agar koi problem ho to:
 
 Railway pe deploy karne ke liye:
 1. ✅ Railway pe project deploy karo
-2. ✅ Done! Kuch aur karne ki zarurat nahi
+2. ✅ Volume setup karo (`/app/upload_bots`)
+3. ✅ Done! Data persist rahega
 
-**Backup location**: Telegram pe Owner ko file aayegi (har 1 ghante mein)
+**Data Storage**: Railway Volume mein persist rahega
+**Backup location**: Telegram pe Owner ko file aayegi (har 24 ghante mein)
 
 ## 🎯 Why Telegram Backup?
 
