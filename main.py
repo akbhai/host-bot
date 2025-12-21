@@ -50,7 +50,7 @@ ADMIN_ID = 562735329 # Replace with your Admin ID (can be same as Owner)
 YOUR_USERNAME = '@akbhai007' # Replace with your Telegram username (without the @)
 
 # Backup Configuration
-BACKUP_INTERVAL = 86400  # Backup every 24 hours (in seconds)
+BACKUP_INTERVAL = 172800  # Backup every 48 hours (in seconds)
 GITHUB_BACKUP_ENABLED = os.environ.get('GITHUB_BACKUP_ENABLED', 'True').lower() == 'true'
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')  # GitHub Personal Access Token
 GITHUB_REPO = os.environ.get('GITHUB_REPO', 'akbhai/host-bot')  # Format: username/repo
@@ -872,12 +872,37 @@ def backup_user_data(user_id, silent=False):
         if not os.path.exists(user_folder):
             logger.info(f"No folder found for user {user_id}")
             return False
+        
+        # Files to exclude from backup (reduce size)
+        exclude_patterns = [
+            '.log',           # Log files
+            '.pyc',           # Python compiled
+            '__pycache__',    # Python cache
+            'node_modules',   # Node modules (huge)
+            '.git',           # Git folder
+            '.env',           # Environment files
+            'package-lock.json',  # Lock files
+            'yarn.lock',
+            '.DS_Store'       # Mac files
+        ]
+        
+        def should_exclude(filepath):
+            """Check if file should be excluded from backup"""
+            for pattern in exclude_patterns:
+                if pattern in filepath:
+                    return True
+            return False
             
-        # Get all files in folder (even if bot is stopped/deleted)
+        # Get all files in folder (excluding unnecessary files)
         all_files = []
         for root, dirs, files in os.walk(user_folder):
+            # Skip excluded directories
+            dirs[:] = [d for d in dirs if d not in ['__pycache__', 'node_modules', '.git']]
+            
             for file in files:
-                all_files.append(file)
+                file_path = os.path.join(root, file)
+                if not should_exclude(file_path):
+                    all_files.append(file)
         
         if not all_files:
             logger.info(f"No files found for user {user_id}")
@@ -886,26 +911,40 @@ def backup_user_data(user_id, silent=False):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         file_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
-        # Create zip of user's folder
+        # Create zip of user's folder with maximum compression
         zip_filename = f"backup_{user_id}_{file_timestamp}.zip"
         zip_path = os.path.join(tempfile.gettempdir(), zip_filename)
         
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        # Use maximum compression level (9) to minimize file size
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zipf:
             for root, dirs, files in os.walk(user_folder):
+                # Skip excluded directories
+                dirs[:] = [d for d in dirs if d not in ['__pycache__', 'node_modules', '.git']]
+                
                 for file in files:
                     file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, user_folder)
-                    zipf.write(file_path, arcname)
+                    if not should_exclude(file_path):
+                        arcname = os.path.relpath(file_path, user_folder)
+                        zipf.write(file_path, arcname)
+        
+        # Get file size in KB/MB
+        file_size = os.path.getsize(zip_path)
+        if file_size < 1024:
+            size_str = f"{file_size} bytes"
+        elif file_size < 1024 * 1024:
+            size_str = f"{file_size / 1024:.1f} KB"
+        else:
+            size_str = f"{file_size / (1024 * 1024):.1f} MB"
         
         # Get user's file info from database (if exists)
         user_file_list = user_files.get(user_id, [])
         db_file_count = len(user_file_list)
         actual_file_count = len(all_files)
         
-        # Build caption
-        caption = f"🔄 Auto-backup: {timestamp}\n\n"
-        caption += f"📁 Files in backup: {actual_file_count}\n"
-        caption += f"💾 Includes all your uploaded files\n"
+        # Build caption in Hinglish
+        caption = f"🔄 Auto-Backup: {timestamp}\n\n"
+        caption += f"📁 Backup me files: {actual_file_count}\n"
+        caption += f"💾 File size: {size_str}\n"
         
         # Check running bots
         running_bots = 0
@@ -913,7 +952,7 @@ def backup_user_data(user_id, silent=False):
             if is_bot_running(user_id, fname):
                 running_bots += 1
         
-        # Show status
+        # Show status in Hinglish
         if db_file_count > 0:
             caption += f"📊 Registered files: {db_file_count}\n"
             if running_bots > 0:
@@ -938,9 +977,10 @@ def backup_user_data(user_id, silent=False):
             shown_files.add(fname)
         
         if actual_file_count > len(shown_files):
-            caption += f"... and {actual_file_count - len(shown_files)} more files\n"
+            caption += f"... aur {actual_file_count - len(shown_files)} files\n"
         
-        caption += "\n💡 Tip: This backup includes ALL files, even stopped/deleted bots!"
+        caption += "\n💡 Tip: Is backup me aapki saari files hain!"
+        caption += "\n⚡ Log files aur cache hata di gayi hain (size kam karne ke liye)"
         
         # Send backup to user
         with open(zip_path, 'rb') as f:
@@ -953,7 +993,7 @@ def backup_user_data(user_id, silent=False):
         
         # Clean up temp zip
         os.remove(zip_path)
-        logger.info(f"✅ User {user_id} backup sent via Telegram ({actual_file_count} files)")
+        logger.info(f"✅ User {user_id} backup sent via Telegram ({actual_file_count} files, {size_str})")
         return True
         
     except Exception as e:
@@ -1497,21 +1537,21 @@ def _logic_manual_backup(message):
     # Admin backup - triggers all users' backups
     if user_id in admin_ids:
         backup_method = "Telegram" if IS_RAILWAY else "GitHub"
-        bot.reply_to(message, f"🔄 Starting backup for all users via {backup_method}...")
+        bot.reply_to(message, f"🔄 Sabhi users ka backup shuru ho raha hai ({backup_method} ke zariye)...")
         try:
             backup_to_github()  # This automatically uses Telegram on Railway
-            bot.send_message(message.chat.id, f"✅ Backup completed! All users will receive their files.")
+            bot.send_message(message.chat.id, f"✅ Backup pura ho gaya! Sabhi users ko unki files mil jayengi.")
         except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Backup failed: {str(e)}")
+            bot.send_message(message.chat.id, f"❌ Backup fail ho gaya: {str(e)}")
             logger.error(f"Manual backup failed: {e}", exc_info=True)
     else:
         # User backup - only their bot data
-        bot.reply_to(message, "🔄 Creating backup of your bot files...")
+        bot.reply_to(message, "🔄 Aapki bot files ka backup ban raha hai...")
         try:
             backup_user_data(user_id)
-            bot.send_message(message.chat.id, "✅ Your backup is ready! Check messages above.")
+            bot.send_message(message.chat.id, "✅ Aapka backup taiyar hai! Upar message check karein.")
         except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Backup failed: {str(e)}")
+            bot.send_message(message.chat.id, f"❌ Backup fail ho gaya: {str(e)}")
             logger.error(f"User {user_id} manual backup failed: {e}", exc_info=True)
 
 def _logic_run_all_scripts(message_or_call):
@@ -2173,14 +2213,14 @@ def speed_callback(call):
 
 def my_backup_callback(call):
     user_id = call.from_user.id
-    bot.answer_callback_query(call.id, "🔄 Creating your backup...")
-    bot.send_message(call.message.chat.id, "🔄 Creating backup of your bot files...")
+    bot.answer_callback_query(call.id, "🔄 Aapka backup ban raha hai...")
+    bot.send_message(call.message.chat.id, "🔄 Aapki bot files ka backup ban raha hai...")
     
     try:
         backup_user_data(user_id)
-        bot.send_message(call.message.chat.id, "✅ Your backup is ready! Check messages above.")
+        bot.send_message(call.message.chat.id, "✅ Aapka backup taiyar hai! Upar message check karein.")
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Backup failed: {str(e)}")
+        bot.send_message(call.message.chat.id, f"❌ Backup fail ho gaya: {str(e)}")
         logger.error(f"User {user_id} backup callback failed: {e}", exc_info=True)
 
 def back_to_main_callback(call):
@@ -2450,16 +2490,16 @@ def owner_backup_callback(call):
         bot.answer_callback_query(call.id, "⚠️ Owner permissions required.", show_alert=True)
         return
     
-    bot.answer_callback_query(call.id, "🔄 Creating your backup...")
-    bot.send_message(call.message.chat.id, "🔄 Creating backup of your bot files...")
+    bot.answer_callback_query(call.id, "🔄 Aapka backup ban raha hai...")
+    bot.send_message(call.message.chat.id, "🔄 Aapki bot files ka backup ban raha hai...")
     
     try:
         if backup_user_data(OWNER_ID):
-            bot.send_message(call.message.chat.id, "✅ Your backup is ready! Check messages above.")
+            bot.send_message(call.message.chat.id, "✅ Aapka backup taiyar hai! Upar message check karein.")
         else:
-            bot.send_message(call.message.chat.id, "⚠️ No files found to backup.")
+            bot.send_message(call.message.chat.id, "⚠️ Backup ke liye koi file nahi mili.")
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Backup failed: {str(e)}")
+        bot.send_message(call.message.chat.id, f"❌ Backup fail ho gaya: {str(e)}")
         logger.error(f"Owner backup failed: {e}", exc_info=True)
 
 def add_subscription_init_callback(call):
