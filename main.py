@@ -47,7 +47,7 @@ def keep_alive():
 TOKEN = '8447957070:AAEHCjb6OytoMjHONaapOkSgJ7Wcp1Qt8aI' # Replace with your actual token
 OWNER_ID = 562735329 # Replace with your Owner ID
 ADMIN_ID = 562735329 # Replace with your Admin ID (can be same as Owner)
-YOUR_USERNAME = '@akbhai007' # Replace with your Telegram username (without the @)
+YOUR_USERNAME = '' # Replace with your Telegram username (without the @)
 
 # Backup Configuration
 BACKUP_INTERVAL = 172800  # Backup every 48 hours (in seconds)

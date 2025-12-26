@@ -121,7 +121,7 @@ python main.py
 TOKEN = '7489746275:AAER3J4rI-Uv_RlwRkuY4RNxInf2XMVExY4'
 OWNER_ID = 562735329
 ADMIN_ID = 562735329
-YOUR_USERNAME = '@akbhai007'
+YOUR_USERNAME = ''  # Your Telegram username
 BACKUP_INTERVAL = 172800  # 48 hours
 ```
 
@@ -171,7 +171,7 @@ test_bot/
 ## 📞 Support
 
 - **Bot Token**: `7489746275:AAER3J4rI-Uv_RlwRkuY4RNxInf2XMVExY4`
-- **Owner**: @akbhai007 (ID: 562735329)
+- **Owner ID**: 562735329
 - **Files**: `/workspaces/host-bot/`
 
 ---
