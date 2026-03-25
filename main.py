@@ -2153,7 +2153,7 @@ def logs_bot_callback(call):
         user_folder = get_user_folder(script_owner_id)
         log_path = os.path.join(user_folder, f"{os.path.splitext(file_name)[0]}.log")
         if not os.path.exists(log_path):
-            bot.answer_callback_query(call.id, f"⚠️ No logs for '{file_name}'.", show_alert=True); return
+            bot.answer_callback_query(call.id, f"⚠️ No logs for '{file_name}'. Run the script first.", show_alert=True); return
 
         bot.answer_callback_query(call.id) 
         try:
