@@ -2,3 +2,6 @@ pyTelegramBotAPI
 psutil
 requests
 flask
+requests-toolbelt
+telethon
+aiohttp
