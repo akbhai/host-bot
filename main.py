@@ -2349,14 +2349,13 @@ def speed_callback(call):
 
 def my_backup_callback(call):
     user_id = call.from_user.id
-    bot.answer_callback_query(call.id, "🔄 Aapka backup ban raha hai...")
-    bot.send_message(call.message.chat.id, "🔄 Aapki bot files ka backup ban raha hai...")
-    
+    bot.answer_callback_query(call.id, "🔄 Backup ban raha hai...")
     try:
-        backup_user_data(user_id)
-        bot.send_message(call.message.chat.id, "✅ Aapka backup taiyar hai! Upar message check karein.")
+        success = backup_user_data(user_id)
+        if not success:
+            bot.send_message(call.message.chat.id, "❌ Backup fail — koi file nahi mili.")
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Backup fail ho gaya: {str(e)}")
+        bot.send_message(call.message.chat.id, f"❌ Backup fail: {str(e)}")
         logger.error(f"User {user_id} backup callback failed: {e}", exc_info=True)
 
 def back_to_main_callback(call):
@@ -2626,16 +2625,13 @@ def owner_backup_callback(call):
         bot.answer_callback_query(call.id, "⚠️ Owner permissions required.", show_alert=True)
         return
     
-    bot.answer_callback_query(call.id, "🔄 Aapka backup ban raha hai...")
-    bot.send_message(call.message.chat.id, "🔄 Aapki bot files ka backup ban raha hai...")
-    
+    bot.answer_callback_query(call.id, "🔄 Backup ban raha hai...")
     try:
-        if backup_user_data(OWNER_ID):
-            bot.send_message(call.message.chat.id, "✅ Aapka backup taiyar hai! Upar message check karein.")
-        else:
+        success = backup_user_data(OWNER_ID)
+        if not success:
             bot.send_message(call.message.chat.id, "⚠️ Backup ke liye koi file nahi mili.")
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Backup fail ho gaya: {str(e)}")
+        bot.send_message(call.message.chat.id, f"❌ Backup fail: {str(e)}")
         logger.error(f"Owner backup failed: {e}", exc_info=True)
 
 def add_subscription_init_callback(call):
