@@ -663,24 +663,89 @@ TELEGRAM_MODULES = {
     'flask': 'Flask',
     'django': 'Django',
     'sqlalchemy': 'SQLAlchemy',
-    'asyncio': None, # Core module, should not be installed
-    'json': None,    # Core module
-    'datetime': None,# Core module
-    'os': None,      # Core module
-    'sys': None,     # Core module
-    're': None,      # Core module
-    'time': None,    # Core module
-    'math': None,    # Core module
-    'random': None,  # Core module
-    'logging': None, # Core module
-    'threading': None,# Core module
-    'subprocess':None,# Core module
-    'zipfile':None,  # Core module
-    'tempfile':None, # Core module
-    'shutil':None,   # Core module
-    'sqlite3':None,  # Core module
+    'asyncio': None,    # Core module
+    'json': None,       # Core module
+    'datetime': None,   # Core module
+    'os': None,         # Core module
+    'sys': None,        # Core module
+    're': None,         # Core module
+    'time': None,       # Core module
+    'math': None,       # Core module
+    'random': None,     # Core module
+    'logging': None,    # Core module
+    'threading': None,  # Core module
+    'subprocess': None, # Core module
+    'zipfile': None,    # Core module
+    'tempfile': None,   # Core module
+    'shutil': None,     # Core module
+    'sqlite3': None,    # Core module
     'psutil': 'psutil',
-    'atexit': None   # Core module
+    'atexit': None,     # Core module
+    # Python stdlib — removed in 3.12 or deprecated, skip install
+    'symbol': None,
+    'parser': None,
+    'imp': None,
+    'distutils': None,
+    'cgi': None,
+    'cgitb': None,
+    'aifc': None,
+    'chunk': None,
+    'crypt': None,
+    'imghdr': None,
+    'mailcap': None,
+    'msilib': None,
+    'nis': None,
+    'nntplib': None,
+    'ossaudiodev': None,
+    'pipes': None,
+    'sndhdr': None,
+    'spwd': None,
+    'sunau': None,
+    'telnetlib': None,
+    'uu': None,
+    'xdrlib': None,
+    # Common stdlib
+    'string': None,
+    'hashlib': None,
+    'secrets': None,
+    'base64': None,
+    'uuid': None,
+    'ssl': None,
+    'socket': None,
+    'pathlib': None,
+    'collections': None,
+    'itertools': None,
+    'functools': None,
+    'typing': None,
+    'abc': None,
+    'io': None,
+    'copy': None,
+    'struct': None,
+    'traceback': None,
+    'warnings': None,
+    'weakref': None,
+    'gc': None,
+    'inspect': None,
+    'ast': None,
+    'dis': None,
+    'token': None,
+    'tokenize': None,
+    'urllib': None,
+    'http': None,
+    'email': None,
+    'html': None,
+    'xml': None,
+    'csv': None,
+    'configparser': None,
+    'argparse': None,
+    'getopt': None,
+    'queue': None,
+    'multiprocessing': None,
+    'concurrent': None,
+    'ctypes': None,
+    'array': None,
+    'enum': None,
+    'dataclasses': None,
 
 }
 # --- End Automatic Package Installation & Script Running ---
