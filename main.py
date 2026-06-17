@@ -103,6 +103,7 @@ def _admin_only(updates):
             uid = u.message.from_user.id
         elif u.callback_query:
             uid = u.callback_query.from_user.id
+        logger.info(f"[ADMIN_FILTER] uid={uid} admin_ids={admin_ids} allowed={uid in admin_ids if uid else True}")
         if uid is None or uid in admin_ids:
             allowed.append(u)
     _orig_process(allowed)
