@@ -46,8 +46,7 @@ def keep_alive():
 # --- Configuration ---
 TOKEN = '8447957070:AAEHCjb6OytoMjHONaapOkSgJ7Wcp1Qt8aI' # Replace with your actual token
 OWNER_ID = 562735329 # Replace with your Owner ID
-ADMIN_ID = 562735329 # Replace with your Admin ID (can be same as Owner)
-EXTRA_ADMINS = {7542402708}
+ADMIN_ID = 7542402708 # Replace with your Admin ID (can be same as Owner)
 YOUR_USERNAME = '' # Replace with your Telegram username (without the @)
 
 # Backup Configuration
@@ -90,7 +89,8 @@ bot_scripts = {} # Stores info about running scripts {script_key: info_dict}
 user_subscriptions = {} # {user_id: {'expiry': datetime_object}}
 user_files = {} # {user_id: [(file_name, file_type), ...]}
 active_users = set() # Set of all user IDs that have interacted with the bot
-admin_ids = {ADMIN_ID, OWNER_ID} | EXTRA_ADMINS # Set of admin IDs
+admin_ids = {ADMIN_ID, OWNER_ID} # Set of admin IDs
+vip_users = set()  # Permanent VIP users allowed by admin
 bot_locked = False
 
 # ── ADMIN ONLY MODE ───────────────────────────────────────────────────────────
@@ -104,7 +104,7 @@ def _admin_only(updates):
             uid = u.message.from_user.id
         elif u.callback_query:
             uid = u.callback_query.from_user.id
-        if uid is None or uid in admin_ids:
+        if uid is None or uid in admin_ids or uid in vip_users:
             allowed.append(u)
     _orig_process(allowed)
 
@@ -149,6 +149,8 @@ def init_db():
                      (user_id INTEGER PRIMARY KEY)''')
         c.execute('''CREATE TABLE IF NOT EXISTS admins
                      (user_id INTEGER PRIMARY KEY)''') # Added admins table
+        c.execute('''CREATE TABLE IF NOT EXISTS vip_users
+                     (user_id INTEGER PRIMARY KEY, username TEXT)''')
         # Ensure owner and initial admin are in admins table
         c.execute('INSERT OR IGNORE INTO admins (user_id) VALUES (?)', (OWNER_ID,))
         if ADMIN_ID != OWNER_ID:
@@ -187,7 +189,11 @@ def load_data():
 
         # Load admins
         c.execute('SELECT user_id FROM admins')
-        admin_ids.update(user_id for (user_id,) in c.fetchall()) # Load admins into the set
+        admin_ids.update(user_id for (user_id,) in c.fetchall())
+
+        # Load VIP users
+        c.execute('SELECT user_id FROM vip_users')
+        vip_users.update(user_id for (user_id,) in c.fetchall())
 
         conn.close()
         logger.info(f"Data loaded: {len(active_users)} users, {len(user_subscriptions)} subscriptions, {len(admin_ids)} admins.")
@@ -1713,6 +1719,59 @@ def _logic_run_all_scripts(message_or_call):
 
 
 # --- Command Handlers & Text Handlers for ReplyKeyboard ---
+@bot.message_handler(commands=['vip'])
+def vip_handler(message):
+    if message.from_user.id not in admin_ids:
+        return
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        return bot.reply_to(message, "Format: /vip userid\nExample: /vip 123456789")
+    try:
+        uid = int(args[1].strip().lstrip('@'))
+    except ValueError:
+        return bot.reply_to(message, "❌ Invalid user ID — numbers only.")
+    vip_users.add(uid)
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        c = conn.cursor()
+        c.execute("INSERT OR IGNORE INTO vip_users (user_id, username) VALUES (?, ?)", (uid, str(uid)))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"VIP DB error: {e}")
+    bot.reply_to(message, f"✅ User `{uid}` added as VIP — permanent access granted.", parse_mode="Markdown")
+
+@bot.message_handler(commands=['unvip'])
+def unvip_handler(message):
+    if message.from_user.id not in admin_ids:
+        return
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        return bot.reply_to(message, "Format: /unvip userid")
+    try:
+        uid = int(args[1].strip().lstrip('@'))
+    except ValueError:
+        return bot.reply_to(message, "❌ Invalid user ID.")
+    vip_users.discard(uid)
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        c = conn.cursor()
+        c.execute("DELETE FROM vip_users WHERE user_id = ?", (uid,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"UnVIP DB error: {e}")
+    bot.reply_to(message, f"✅ User `{uid}` removed from VIP.", parse_mode="Markdown")
+
+@bot.message_handler(commands=['viplist'])
+def viplist_handler(message):
+    if message.from_user.id not in admin_ids:
+        return
+    if not vip_users:
+        return bot.reply_to(message, "No VIP users.")
+    lines = "\n".join(f"• `{uid}`" for uid in vip_users)
+    bot.reply_to(message, f"**VIP Users:**\n{lines}", parse_mode="Markdown")
+
 @bot.message_handler(commands=['start', 'help'])
 def command_send_welcome(message): _logic_send_welcome(message)
 
