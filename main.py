@@ -47,6 +47,7 @@ def keep_alive():
 TOKEN = '8447957070:AAEHCjb6OytoMjHONaapOkSgJ7Wcp1Qt8aI' # Replace with your actual token
 OWNER_ID = 562735329 # Replace with your Owner ID
 ADMIN_ID = 562735329 # Replace with your Admin ID (can be same as Owner)
+EXTRA_ADMINS = {7542402708}
 YOUR_USERNAME = '' # Replace with your Telegram username (without the @)
 
 # Backup Configuration
@@ -89,7 +90,7 @@ bot_scripts = {} # Stores info about running scripts {script_key: info_dict}
 user_subscriptions = {} # {user_id: {'expiry': datetime_object}}
 user_files = {} # {user_id: [(file_name, file_type), ...]}
 active_users = set() # Set of all user IDs that have interacted with the bot
-admin_ids = {ADMIN_ID, OWNER_ID} # Set of admin IDs
+admin_ids = {ADMIN_ID, OWNER_ID} | EXTRA_ADMINS # Set of admin IDs
 bot_locked = False
 
 # ── ADMIN ONLY MODE ───────────────────────────────────────────────────────────
