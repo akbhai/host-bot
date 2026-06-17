@@ -90,7 +90,10 @@ user_subscriptions = {} # {user_id: {'expiry': datetime_object}}
 user_files = {} # {user_id: [(file_name, file_type), ...]}
 active_users = set() # Set of all user IDs that have interacted with the bot
 admin_ids = {ADMIN_ID, OWNER_ID, 565094704} # Set of admin IDs
-vip_users = set()  # Permanent VIP users allowed by admin
+vip_users = set()
+
+def _is_allowed(uid):
+    return uid in admin_ids or uid in vip_users  # Permanent VIP users allowed by admin
 bot_locked = False
 
 # ── ADMIN ONLY MODE ───────────────────────────────────────────────────────────
@@ -104,11 +107,14 @@ def _admin_only(updates):
             uid = u.message.from_user.id
         elif u.callback_query:
             uid = u.callback_query.from_user.id
-        if uid is None or uid in admin_ids or uid in vip_users:
+        if uid is None or _is_allowed(uid):
             allowed.append(u)
     _orig_process(allowed)
 
 bot.process_new_updates = _admin_only
+
+# Also patch get_updates to filter at source
+_orig_get_updates = bot.get_updates if hasattr(bot, 'get_updates') else None
 # free_mode = False # Removed free_mode
 
 # --- Logging Setup ---
