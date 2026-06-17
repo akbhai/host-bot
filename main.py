@@ -82,7 +82,7 @@ os.makedirs(UPLOAD_BOTS_DIR, exist_ok=True)
 os.makedirs(IROTECH_DIR, exist_ok=True)
 
 # Initialize bot
-bot = telebot.TeleBot(TOKEN, use_class_middlewares=True)
+bot = telebot.TeleBot(TOKEN)
 
 # --- Data structures ---
 bot_scripts = {} # Stores info about running scripts {script_key: info_dict}
@@ -93,16 +93,21 @@ admin_ids = {ADMIN_ID, OWNER_ID} # Set of admin IDs
 bot_locked = False
 
 # ── ADMIN ONLY MODE ───────────────────────────────────────────────────────────
-@bot.middleware_handler(update_types=['message', 'callback_query'])
-def admin_only_middleware(bot_instance, update):
-    if hasattr(update, 'message') and update.message:
-        uid = update.message.from_user.id
-    elif hasattr(update, 'callback_query') and update.callback_query:
-        uid = update.callback_query.from_user.id
-    else:
-        return
-    if uid not in admin_ids:
-        raise StopIteration
+_orig_process = bot.process_new_updates
+
+def _admin_only(updates):
+    allowed = []
+    for u in updates:
+        uid = None
+        if u.message:
+            uid = u.message.from_user.id
+        elif u.callback_query:
+            uid = u.callback_query.from_user.id
+        if uid is None or uid in admin_ids:
+            allowed.append(u)
+    _orig_process(allowed)
+
+bot.process_new_updates = _admin_only
 # free_mode = False # Removed free_mode
 
 # --- Logging Setup ---
