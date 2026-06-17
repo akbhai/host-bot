@@ -82,7 +82,7 @@ os.makedirs(UPLOAD_BOTS_DIR, exist_ok=True)
 os.makedirs(IROTECH_DIR, exist_ok=True)
 
 # Initialize bot
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot(TOKEN, use_class_middlewares=True)
 
 # --- Data structures ---
 bot_scripts = {} # Stores info about running scripts {script_key: info_dict}
@@ -91,6 +91,18 @@ user_files = {} # {user_id: [(file_name, file_type), ...]}
 active_users = set() # Set of all user IDs that have interacted with the bot
 admin_ids = {ADMIN_ID, OWNER_ID} # Set of admin IDs
 bot_locked = False
+
+# ── ADMIN ONLY MODE ───────────────────────────────────────────────────────────
+@bot.middleware_handler(update_types=['message', 'callback_query'])
+def admin_only_middleware(bot_instance, update):
+    if hasattr(update, 'message') and update.message:
+        uid = update.message.from_user.id
+    elif hasattr(update, 'callback_query') and update.callback_query:
+        uid = update.callback_query.from_user.id
+    else:
+        return
+    if uid not in admin_ids:
+        raise StopIteration
 # free_mode = False # Removed free_mode
 
 # --- Logging Setup ---
