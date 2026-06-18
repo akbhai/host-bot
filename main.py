@@ -2826,7 +2826,7 @@ if __name__ == '__main__':
     logger.info("🚀 Starting polling...")
     while True:
         try:
-            bot.infinity_polling(logger_level=logging.INFO, timeout=60, long_polling_timeout=30)
+            bot.infinity_polling(logger_level=logging.INFO, timeout=25, long_polling_timeout=20, threaded=True)
         except requests.exceptions.ReadTimeout: logger.warning("Polling ReadTimeout. Restarting in 5s..."); time.sleep(5)
         except requests.exceptions.ConnectionError as ce: logger.error(f"Polling ConnectionError: {ce}. Retrying in 15s..."); time.sleep(15)
         except Exception as e:
