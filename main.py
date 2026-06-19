@@ -1817,6 +1817,56 @@ def delete_bot_callback(call):
         logger.error(f"Error in delete_bot_callback for '{call.data}': {e}", exc_info=True)
         bot.answer_callback_query(call.id, "Error deleting.", show_alert=True)
 
+_live_log_sessions = {}  # {msg_id: {"stop": False}}
+
+def _read_log_tail(log_path, max_chars=3000):
+    if not os.path.exists(log_path):
+        return "(No log file)"
+    size = os.path.getsize(log_path)
+    if size == 0:
+        return "(Log empty)"
+    try:
+        with open(log_path, 'rb') as f:
+            f.seek(max(0, size - max_chars * 2), os.SEEK_SET)
+            raw = f.read()
+        content = raw.decode('utf-8', errors='ignore')
+        if len(content) > max_chars:
+            content = "...\n" + content[-max_chars:]
+        return content.strip() or "(No visible content)"
+    except:
+        return "(Error reading log)"
+
+def _live_log_worker(chat_id, msg_id, log_path, file_name):
+    session = _live_log_sessions.get(msg_id, {})
+    deadline = time.time() + 60  # 1 minute auto-off
+    last_content = None
+    stop_btn = types.InlineKeyboardMarkup()
+    stop_btn.add(types.InlineKeyboardButton("⛔ Stop Live Logs", callback_data=f"stoplogs_{msg_id}"))
+
+    while time.time() < deadline and not session.get("stop"):
+        content = _read_log_tail(log_path)
+        remaining = max(0, int(deadline - time.time()))
+        text = f"📜 **Live Logs** — `{file_name}`\n⏱ Auto-off in {remaining}s\n```\n{content}\n```"
+        if content != last_content:
+            try:
+                bot.edit_message_text(text, chat_id, msg_id, parse_mode='Markdown', reply_markup=stop_btn)
+                last_content = content
+            except Exception as e:
+                if "message is not modified" not in str(e).lower():
+                    break
+        time.sleep(3)
+
+    # Final update — stopped
+    try:
+        content = _read_log_tail(log_path)
+        reason = "⛔ Stopped" if session.get("stop") else "⏰ Auto-off (1 min)"
+        bot.edit_message_text(
+            f"📜 **Logs** — `{file_name}` [{reason}]\n```\n{content}\n```",
+            chat_id, msg_id, parse_mode='Markdown'
+        )
+    except: pass
+    _live_log_sessions.pop(msg_id, None)
+
 def logs_bot_callback(call):
     try:
         _, script_owner_id_str, file_name = call.data.split('_', 2)
@@ -1830,42 +1880,54 @@ def logs_bot_callback(call):
 
         user_files_list = user_files.get(script_owner_id, [])
         if not any(f[0] == file_name for f in user_files_list):
-            bot.answer_callback_query(call.id, "⚠️ File not found.", show_alert=True); check_files_callback(call); return
+            bot.answer_callback_query(call.id, "⚠️ File not found.", show_alert=True); return
 
         user_folder = get_user_folder(script_owner_id)
         log_path = os.path.join(user_folder, f"{os.path.splitext(file_name)[0]}.log")
         if not os.path.exists(log_path):
-            bot.answer_callback_query(call.id, f"⚠️ No logs for '{file_name}'.", show_alert=True); return
+            bot.answer_callback_query(call.id, f"⚠️ No logs for '{file_name}' yet.", show_alert=True); return
 
-        bot.answer_callback_query(call.id) 
+        bot.answer_callback_query(call.id, "📜 Starting live logs...")
+        content = _read_log_tail(log_path)
+        stop_btn = types.InlineKeyboardMarkup()
+
+        sent = bot.send_message(
+            chat_id_for_reply,
+            f"📜 **Live Logs** — `{file_name}`\n⏱ Auto-off in 60s\n```\n{content}\n```",
+            parse_mode='Markdown',
+            reply_markup=stop_btn
+        )
+        msg_id = sent.message_id
+        _live_log_sessions[msg_id] = {"stop": False}
+
+        # Add stop button now that we have msg_id
+        stop_btn2 = types.InlineKeyboardMarkup()
+        stop_btn2.add(types.InlineKeyboardButton("⛔ Stop Live Logs", callback_data=f"stoplogs_{msg_id}"))
         try:
-            log_content = ""; file_size = os.path.getsize(log_path)
-            max_log_kb = 100; max_tg_msg = 4096
-            if file_size == 0: log_content = "(Log empty)"
-            elif file_size > max_log_kb * 1024:
-                 with open(log_path, 'rb') as f: f.seek(-max_log_kb * 1024, os.SEEK_END); log_bytes = f.read()
-                 log_content = log_bytes.decode('utf-8', errors='ignore')
-                 log_content = f"(Last {max_log_kb} KB)\n...\n" + log_content
-            else:
-                 with open(log_path, 'r', encoding='utf-8', errors='ignore') as f: log_content = f.read()
+            bot.edit_message_reply_markup(chat_id_for_reply, msg_id, reply_markup=stop_btn2)
+        except: pass
 
-            if len(log_content) > max_tg_msg:
-                log_content = log_content[-max_tg_msg:]
-                first_nl = log_content.find('\n')
-                if first_nl != -1: log_content = "...\n" + log_content[first_nl+1:]
-                else: log_content = "...\n" + log_content 
-            if not log_content.strip(): log_content = "(No visible content)"
+        t = threading.Thread(target=_live_log_worker, args=(chat_id_for_reply, msg_id, log_path, file_name), daemon=True)
+        t.start()
 
-            bot.send_message(chat_id_for_reply, f"📜 Logs for `{file_name}` (User `{script_owner_id}`):\n```\n{log_content}\n```", parse_mode='Markdown')
-        except Exception as e:
-            logger.error(f"Error reading/sending log {log_path}: {e}", exc_info=True)
-            bot.send_message(chat_id_for_reply, f"❌ Error reading log for `{file_name}`.")
     except (ValueError, IndexError) as e:
         logger.error(f"Error parsing logs callback '{call.data}': {e}")
         bot.answer_callback_query(call.id, "Error: Invalid logs command.", show_alert=True)
     except Exception as e:
-        logger.error(f"Error in logs_bot_callback for '{call.data}': {e}", exc_info=True)
+        logger.error(f"Error in logs_bot_callback: {e}", exc_info=True)
         bot.answer_callback_query(call.id, "Error fetching logs.", show_alert=True)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("stoplogs_"))
+def stop_live_logs_callback(call):
+    try:
+        msg_id = int(call.data.split("_")[1])
+        if msg_id in _live_log_sessions:
+            _live_log_sessions[msg_id]["stop"] = True
+            bot.answer_callback_query(call.id, "⛔ Live logs stopped.")
+        else:
+            bot.answer_callback_query(call.id, "Already stopped.")
+    except Exception as e:
+        bot.answer_callback_query(call.id, "Error stopping logs.")
 
 def speed_callback(call):
     user_id = call.from_user.id
