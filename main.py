@@ -76,6 +76,7 @@ user_subscriptions = {} # {user_id: {'expiry': datetime_object}}
 user_files = {} # {user_id: [(file_name, file_type), ...]}
 active_users = set() # Set of all user IDs that have interacted with the bot
 admin_ids = {ADMIN_ID, OWNER_ID, 565094704, 7542402708} # Set of admin IDs
+allowed_users = set()  # Extra users added via /add
 bot_locked = False
 
 _orig_process = bot.process_new_updates
@@ -85,7 +86,7 @@ def _admin_only(updates):
         uid = None
         if u.message: uid = u.message.from_user.id
         elif u.callback_query: uid = u.callback_query.from_user.id
-        if uid is None or uid in admin_ids:
+        if uid is None or uid in admin_ids or uid in allowed_users:
             allowed.append(u)
     _orig_process(allowed)
 bot.process_new_updates = _admin_only
@@ -1279,6 +1280,43 @@ def _logic_run_all_scripts(message_or_call):
 
 
 # --- Command Handlers & Text Handlers for ReplyKeyboard ---
+@bot.message_handler(commands=['add'])
+def add_user(message):
+    if message.from_user.id not in admin_ids:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        return bot.reply_to(message, "Usage: /add <user_id>")
+    try:
+        uid = int(parts[1])
+        allowed_users.add(uid)
+        bot.reply_to(message, f"✅ User `{uid}` added.", parse_mode="Markdown")
+    except ValueError:
+        bot.reply_to(message, "❌ Invalid user ID.")
+
+@bot.message_handler(commands=['remove'])
+def remove_user(message):
+    if message.from_user.id not in admin_ids:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        return bot.reply_to(message, "Usage: /remove <user_id>")
+    try:
+        uid = int(parts[1])
+        allowed_users.discard(uid)
+        bot.reply_to(message, f"✅ User `{uid}` removed.", parse_mode="Markdown")
+    except ValueError:
+        bot.reply_to(message, "❌ Invalid user ID.")
+
+@bot.message_handler(commands=['allowlist'])
+def allowlist(message):
+    if message.from_user.id not in admin_ids:
+        return
+    if not allowed_users:
+        return bot.reply_to(message, "No extra users added yet.")
+    msg = "👥 **Allowed Users:**\n" + "\n".join(f"• `{uid}`" for uid in sorted(allowed_users))
+    bot.reply_to(message, msg, parse_mode="Markdown")
+
 @bot.message_handler(commands=['start', 'help'])
 def command_send_welcome(message): _logic_send_welcome(message)
 
