@@ -7,19 +7,17 @@ import shutil
 from telebot import types
 import time
 from datetime import datetime, timedelta
-# Removed unused telegram.* imports as we are using telebot consistently
-# from telegram import Update
-# from telegram.ext import Updater, CommandHandler, CallbackContext
+
 import psutil
 import sqlite3
-import json # Kept in case needed elsewhere, but not used in provided logic
-import logging # Kept in case needed elsewhere
-import signal # Kept in case needed elsewhere
+import json
+import logging
+import signal
 import threading
-import re # Added for regex matching in auto-install
-import sys # Added for sys.executable
+import re
+import sys
 import atexit
-import requests # For polling exceptions
+import requests
 
 # --- Flask Keep Alive ---
 from flask import Flask
@@ -50,6 +48,19 @@ ADMIN_ID = 562735329 # Replace with your Admin ID (can be same as Owner)
 YOUR_USERNAME = '@akbhai007' # Replace with your Telegram username (without the @)
 UPDATE_CHANNEL = 'https://t.me/+Y2QWCIycJPplMDE1' # Replace with your update channel link
 
+# Backup Configuration
+BACKUP_INTERVAL = 172800  # 48 hours
+GITHUB_BACKUP_ENABLED = os.environ.get('GITHUB_BACKUP_ENABLED', 'True').lower() == 'true'
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')
+GITHUB_REPO = os.environ.get('GITHUB_REPO', 'akbhai/host-bot')
+IS_RAILWAY = (
+    os.environ.get('RAILWAY_ENVIRONMENT') is not None or
+    os.environ.get('RAILWAY_STATIC_URL') is not None or
+    os.environ.get('RAILWAY_PROJECT_ID') is not None or
+    os.environ.get('RAILWAY_SERVICE_ID') is not None
+)
+BACKUP_METHOD = os.environ.get('BACKUP_METHOD', 'telegram' if IS_RAILWAY else 'git')
+
 # Folder setup - using absolute paths
 BASE_DIR = os.path.abspath(os.path.dirname(__file__)) # Get script's directory
 UPLOAD_BOTS_DIR = os.path.join(BASE_DIR, 'upload_bots')
@@ -61,7 +72,7 @@ FREE_USER_LIMIT = 5
 SUBSCRIBED_USER_LIMIT = 15 # Changed from 10 to 15
 ADMIN_LIMIT = 999       # Changed from 50 to 999
 OWNER_LIMIT = float('inf') # Changed from 999 to infinity
-# FREE_MODE_LIMIT = 5 # Removed as free_mode is removed
+
 
 # Create necessary directories
 os.makedirs(UPLOAD_BOTS_DIR, exist_ok=True)
@@ -90,7 +101,7 @@ def _block_non_allowed_msg(message):
 @bot.callback_query_handler(func=lambda call: not _is_allowed(call.from_user.id))
 def _block_non_allowed_cb(call):
     bot.answer_callback_query(call.id)  # Dismiss spinner silently
-# free_mode = False # Removed free_mode
+
 
 # --- Logging Setup ---
 # Configure basic logging
@@ -180,6 +191,173 @@ init_db()
 load_data()
 # --- End Database Setup ---
 
+# --- Backup System ---
+def backup_to_github():
+    logger.info(f"Backup triggered - IS_RAILWAY: {IS_RAILWAY}, BACKUP_METHOD: {BACKUP_METHOD}")
+    if IS_RAILWAY or BACKUP_METHOD == 'telegram':
+        logger.info("Using Telegram backup")
+        backup_via_telegram()
+    elif BACKUP_METHOD == 'api':
+        logger.info("Using GitHub API backup")
+        backup_via_github_api()
+    else:
+        logger.info("Using Git backup")
+        backup_via_git()
+
+def backup_via_git():
+    try:
+        if IS_RAILWAY:
+            logger.warning("⚠️ Git backup disabled on Railway.")
+            return
+        logger.info("Starting Git backup...")
+        status_result = subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True, cwd=BASE_DIR)
+        if not status_result.stdout.strip():
+            logger.info("No changes to backup")
+            return
+        subprocess.run(['git', 'add', 'inf/'], cwd=BASE_DIR, check=False)
+        subprocess.run(['git', 'add', 'upload_bots/'], cwd=BASE_DIR, check=False)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        commit_msg = f"Auto-backup: {timestamp}"
+        commit_result = subprocess.run(['git', 'commit', '-m', commit_msg], capture_output=True, text=True, cwd=BASE_DIR)
+        if commit_result.returncode == 0:
+            push_result = subprocess.run(['git', 'push', 'origin', 'HEAD'], capture_output=True, text=True, cwd=BASE_DIR)
+            if push_result.returncode == 0:
+                logger.info(f"✅ Backup successful: {commit_msg}")
+            else:
+                logger.error(f"❌ Push failed: {push_result.stderr}")
+    except Exception as e:
+        logger.error(f"❌ Backup error: {e}", exc_info=True)
+
+def backup_user_data(user_id, silent=False):
+    try:
+        user_folder = get_user_folder(user_id)
+        if not os.path.exists(user_folder):
+            return False
+        exclude_patterns = ['.log', '.pyc', '__pycache__', 'node_modules', '.git', '.env', 'package-lock.json', 'yarn.lock', '.DS_Store']
+        def should_exclude(filepath):
+            return any(p in filepath for p in exclude_patterns)
+        all_files = []
+        for root, dirs, files in os.walk(user_folder):
+            dirs[:] = [d for d in dirs if d not in ['__pycache__', 'node_modules', '.git']]
+            for file in files:
+                file_path = os.path.join(root, file)
+                if not should_exclude(file_path):
+                    all_files.append(file)
+        if not all_files:
+            return False
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        file_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        zip_filename = f"backup_{user_id}_{file_timestamp}.zip"
+        zip_path = os.path.join(tempfile.gettempdir(), zip_filename)
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zipf:
+            for root, dirs, files in os.walk(user_folder):
+                dirs[:] = [d for d in dirs if d not in ['__pycache__', 'node_modules', '.git']]
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    if not should_exclude(file_path):
+                        arcname = os.path.relpath(file_path, user_folder)
+                        zipf.write(file_path, arcname)
+        file_size = os.path.getsize(zip_path)
+        if file_size < 1024: size_str = f"{file_size} bytes"
+        elif file_size < 1024*1024: size_str = f"{file_size/1024:.1f} KB"
+        else: size_str = f"{file_size/(1024*1024):.1f} MB"
+        user_file_list = user_files.get(user_id, [])
+        actual_file_count = len(all_files)
+        running_bots = sum(1 for fname, ftype in user_file_list if is_bot_running(user_id, fname))
+        caption = f"🔄 Auto-Backup: {timestamp}\n\n"
+        caption += f"📁 Backup me files: {actual_file_count}\n"
+        caption += f"💾 File size: {size_str}\n"
+        if user_file_list:
+            caption += f"📊 Registered files: {len(user_file_list)}\n"
+            if running_bots > 0: caption += f"🟢 Running bots: {running_bots}\n"
+            stopped = len(user_file_list) - running_bots
+            if stopped > 0: caption += f"⚫ Stopped bots: {stopped}\n"
+        caption += "\n📂 Files:\n"
+        shown = set()
+        for fname, ftype in user_file_list[:5]:
+            status = "🟢" if is_bot_running(user_id, fname) else "⚫"
+            caption += f"{status} {fname} ({ftype})\n"
+            shown.add(fname)
+        for fname in [f for f in all_files if f not in shown][:5-len(shown)]:
+            caption += f"📄 {fname}\n"
+            shown.add(fname)
+        if actual_file_count > len(shown):
+            caption += f"... aur {actual_file_count - len(shown)} files\n"
+        caption += "\n💡 Tip: Is backup me aapki saari files hain!"
+        caption += "\n⚡ Log files aur cache hata di gayi hain"
+        with open(zip_path, 'rb') as f:
+            bot.send_document(user_id, f, caption=caption, visible_file_name=zip_filename)
+        os.remove(zip_path)
+        logger.info(f"✅ User {user_id} backup sent ({actual_file_count} files, {size_str})")
+        return True
+    except Exception as e:
+        logger.error(f"❌ User {user_id} backup error: {e}", exc_info=True)
+        return False
+
+def backup_via_telegram():
+    try:
+        logger.info("Starting Telegram backup...")
+        backed_up = 0
+        skipped = 0
+        if os.path.exists(UPLOAD_BOTS_DIR):
+            user_folders = [d for d in os.listdir(UPLOAD_BOTS_DIR)
+                            if os.path.isdir(os.path.join(UPLOAD_BOTS_DIR, d)) and d.isdigit()]
+            logger.info(f"Found {len(user_folders)} user folders to backup")
+            for folder_name in user_folders:
+                try:
+                    uid = int(folder_name)
+                    if backup_user_data(uid): backed_up += 1
+                    else: skipped += 1
+                    time.sleep(1)
+                except Exception as e:
+                    logger.error(f"Failed to backup user {folder_name}: {e}")
+                    skipped += 1
+        logger.info(f"✅ Backed up {backed_up} users, skipped {skipped}")
+    except Exception as e:
+        logger.error(f"❌ Telegram Backup error: {e}", exc_info=True)
+
+def backup_via_github_api():
+    try:
+        if IS_RAILWAY:
+            backup_via_telegram()
+            return
+        if not GITHUB_TOKEN:
+            logger.error("❌ GITHUB_TOKEN not set.")
+            return
+        import base64
+        if os.path.exists(DATABASE_PATH):
+            with open(DATABASE_PATH, 'rb') as f:
+                db_content = base64.b64encode(f.read()).decode('utf-8')
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/backups/bot_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+            headers = {'Authorization': f'token {GITHUB_TOKEN}', 'Accept': 'application/vnd.github.v3+json'}
+            data = {'message': f'Auto-backup: {timestamp}', 'content': db_content, 'branch': 'main'}
+            response = requests.put(api_url, headers=headers, json=data)
+            if response.status_code in [200, 201]:
+                logger.info(f"✅ DB backup via API: {timestamp}")
+            else:
+                logger.error(f"❌ API backup failed: {response.status_code}")
+    except Exception as e:
+        logger.error(f"❌ API Backup error: {e}", exc_info=True)
+
+def backup_loop():
+    while GITHUB_BACKUP_ENABLED:
+        try:
+            time.sleep(BACKUP_INTERVAL)
+            backup_to_github()
+        except Exception as e:
+            logger.error(f"❌ Backup loop error: {e}", exc_info=True)
+
+def start_backup_system():
+    if GITHUB_BACKUP_ENABLED:
+        threading.Thread(target=backup_loop, daemon=True).start()
+        method = "Telegram" if (IS_RAILWAY or BACKUP_METHOD == 'telegram') else ("GitHub API" if BACKUP_METHOD == 'api' else "Git")
+        logger.info(f"🔄 Auto-backup started — method: {method}, interval: {BACKUP_INTERVAL}s")
+        backup_to_github()
+    else:
+        logger.info("⚠️ Backup system disabled")
+# --- End Backup System ---
+
 # --- Helper Functions ---
 def get_user_folder(user_id):
     """Get or create user's folder for storing files"""
@@ -189,7 +367,7 @@ def get_user_folder(user_id):
 
 def get_user_file_limit(user_id):
     """Get the file upload limit for a user"""
-    # if free_mode: return FREE_MODE_LIMIT # Removed free_mode check
+
     if user_id == OWNER_ID: return OWNER_LIMIT
     if user_id in admin_ids: return ADMIN_LIMIT
     if user_id in user_subscriptions and user_subscriptions[user_id]['expiry'] > datetime.now():
@@ -425,14 +603,9 @@ def run_script(script_path, script_owner_id, user_folder, file_name, message_obj
              bot.reply_to(message_obj_for_reply, f"❌ Failed to open log file '{log_file_path}': {e}")
              return
         try:
-            startupinfo = None; creationflags = 0
-            if os.name == 'nt':
-                 startupinfo = subprocess.STARTUPINFO(); startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                 startupinfo.wShowWindow = subprocess.SW_HIDE
             process = subprocess.Popen(
                 [sys.executable, script_path], cwd=user_folder, stdout=log_file, stderr=log_file,
-                stdin=subprocess.PIPE, startupinfo=startupinfo, creationflags=creationflags,
-                encoding='utf-8', errors='ignore'
+                stdin=subprocess.PIPE, encoding='utf-8', errors='ignore'
             )
             logger.info(f"Started Python process {process.pid} for {script_key}")
             bot_scripts[script_key] = {
@@ -539,14 +712,9 @@ def run_js_script(script_path, script_owner_id, user_folder, file_name, message_
             bot.reply_to(message_obj_for_reply, f"❌ Failed to open log file '{log_file_path}': {e}")
             return
         try:
-            startupinfo = None; creationflags = 0
-            if os.name == 'nt':
-                 startupinfo = subprocess.STARTUPINFO(); startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                 startupinfo.wShowWindow = subprocess.SW_HIDE
             process = subprocess.Popen(
                 ['node', script_path], cwd=user_folder, stdout=log_file, stderr=log_file,
-                stdin=subprocess.PIPE, startupinfo=startupinfo, creationflags=creationflags,
-                encoding='utf-8', errors='ignore'
+                stdin=subprocess.PIPE, encoding='utf-8', errors='ignore'
             )
             logger.info(f"Started JS process {process.pid} for {script_key}")
             bot_scripts[script_key] = {
@@ -824,12 +992,14 @@ def create_main_menu_inline(user_id):
         markup.add(admin_buttons[1], admin_buttons[3]) # Stats, Broadcast
         markup.add(admin_buttons[2], admin_buttons[5]) # Lock Bot, Run All Scripts
         markup.add(admin_buttons[4]) # Admin Panel
+        markup.add(types.InlineKeyboardButton('💾 My Backup', callback_data='my_backup'))
         markup.add(buttons[4]) # Contact
     else:
         markup.add(buttons[0])
         markup.add(buttons[1], buttons[2])
         markup.add(buttons[3])
         markup.add(types.InlineKeyboardButton('📊 Statistics', callback_data='stats')) # Allow non-admins to see stats too
+        markup.add(types.InlineKeyboardButton('💾 My Backup', callback_data='my_backup'))
         markup.add(buttons[4])
     return markup
 
@@ -1080,7 +1250,6 @@ def _logic_upload_file(message):
         bot.reply_to(message, "⚠️ Bot locked by admin, cannot accept files.")
         return
 
-    # Removed free_mode check, relies on get_user_file_limit and FREE_USER_LIMIT
     # Users need to be admin or subscribed to upload if FREE_USER_LIMIT is 0
     # For now, FREE_USER_LIMIT > 0, so free users can upload up to that limit.
     # If we want to restrict free users entirely, set FREE_USER_LIMIT to 0.
@@ -1119,14 +1288,12 @@ def _logic_bot_speed(message):
         bot.send_chat_action(chat_id, 'typing')
         response_time = round((time.time() - start_time_ping) * 1000, 2)
         status = "🔓 Unlocked" if not bot_locked else "🔒 Locked"
-        # mode = "💰 Free Mode: ON" if free_mode else "💸 Free Mode: OFF" # Removed free_mode
         if user_id == OWNER_ID: user_level = "👑 Owner"
         elif user_id in admin_ids: user_level = "🛡️ Admin"
         elif user_id in user_subscriptions and user_subscriptions[user_id].get('expiry', datetime.min) > datetime.now(): user_level = "⭐ Premium"
         else: user_level = "🆓 Free User"
         speed_msg = (f"⚡ Bot Speed & Status:\n\n⏱️ API Response Time: {response_time} ms\n"
                      f"🚦 Bot Status: {status}\n"
-                     # f"模式 Mode: {mode}\n" # Removed
                      f"👤 Your Level: {user_level}")
         bot.edit_message_text(speed_msg, chat_id, wait_msg.message_id)
     except Exception as e:
@@ -1168,7 +1335,6 @@ def _logic_statistics(message):
 
     if user_id in admin_ids:
         stats_msg_admin = (f"🔒 Bot Status: {'🔴 Locked' if bot_locked else '🟢 Unlocked'}\n"
-                           # f"💰 Free Mode: {'✅ ON' if free_mode else '❌ OFF'}\n" # Removed
                            f"🤖 Your Running Bots: {user_running_bots}")
         stats_msg = stats_msg_base + stats_msg_admin
     else:
@@ -1194,7 +1360,6 @@ def _logic_toggle_lock_bot(message):
     logger.warning(f"Bot {status} by Admin {message.from_user.id} via command/button.")
     bot.reply_to(message, f"🔒 Bot has been {status}.")
 
-# def _logic_toggle_free_mode(message): # Removed
 #     pass
 
 def _logic_admin_panel(message):
@@ -1334,7 +1499,7 @@ BUTTON_TEXT_TO_LOGIC = {
     "💳 Subscriptions": _logic_subscriptions_panel,
     "📢 Broadcast": _logic_broadcast_init,
     "🔒 Lock Bot": _logic_toggle_lock_bot, 
-    # "💰 Free Mode": _logic_toggle_free_mode, # Removed
+
     "🟢 Running All Code": _logic_run_all_scripts, # Added
     "👑 Admin Panel": _logic_admin_panel,
 }
@@ -1363,8 +1528,7 @@ def command_statistics(message): _logic_statistics(message)
 def command_broadcast(message): _logic_broadcast_init(message)
 @bot.message_handler(commands=['lockbot']) 
 def command_lock_bot(message): _logic_toggle_lock_bot(message)
-# @bot.message_handler(commands=['freemode']) # Removed
-# def command_free_mode(message): _logic_toggle_free_mode(message)
+
 @bot.message_handler(commands=['adminpanel'])
 def command_admin_panel(message): _logic_admin_panel(message)
 @bot.message_handler(commands=['runningallcode']) # Added
@@ -1465,6 +1629,7 @@ def _handle_callbacks_worker(call):
         elif data.startswith('delete_'): delete_bot_callback(call)
         elif data.startswith('logs_'): logs_bot_callback(call)
         elif data == 'speed': speed_callback(call)
+        elif data == 'my_backup': my_backup_callback(call)
         elif data == 'back_to_main': back_to_main_callback(call)
         elif data.startswith('confirm_broadcast_'): handle_confirm_broadcast(call)
         elif data == 'cancel_broadcast': handle_cancel_broadcast(call)
@@ -1473,7 +1638,7 @@ def _handle_callbacks_worker(call):
         elif data == 'stats': stats_callback(call) # No admin check here, handled in func
         elif data == 'lock_bot': admin_required_callback(call, lock_bot_callback)
         elif data == 'unlock_bot': admin_required_callback(call, unlock_bot_callback)
-        # elif data == 'free_mode': admin_required_callback(call, toggle_free_mode_callback) # Removed
+
         elif data == 'run_all_scripts': admin_required_callback(call, run_all_scripts_callback) # Added
         elif data == 'broadcast': admin_required_callback(call, broadcast_init_callback) 
         elif data == 'admin_panel': admin_required_callback(call, admin_panel_callback)
@@ -1505,7 +1670,6 @@ def owner_required_callback(call, func_to_run):
 
 def upload_callback(call):
     user_id = call.from_user.id
-    # Removed free_mode check
     file_limit = get_user_file_limit(user_id)
     current_files = get_user_file_count(user_id)
     if current_files >= file_limit:
@@ -1950,14 +2114,12 @@ def speed_callback(call):
         bot.send_chat_action(chat_id, 'typing') 
         response_time = round((time.time() - start_cb_ping_time) * 1000, 2)
         status = "🔓 Unlocked" if not bot_locked else "🔒 Locked"
-        # mode = "💰 Free Mode: ON" if free_mode else "💸 Free Mode: OFF" # Removed
         if user_id == OWNER_ID: user_level = "👑 Owner"
         elif user_id in admin_ids: user_level = "🛡️ Admin"
         elif user_id in user_subscriptions and user_subscriptions[user_id].get('expiry', datetime.min) > datetime.now(): user_level = "⭐ Premium"
         else: user_level = "🆓 Free User"
         speed_msg = (f"⚡ Bot Speed & Status:\n\n⏱️ API Response Time: {response_time} ms\n"
                      f"🚦 Bot Status: {status}\n"
-                     # f"模式 Mode: {mode}\n" # Removed
                      f"👤 Your Level: {user_level}")
         bot.answer_callback_query(call.id) 
         bot.edit_message_text(speed_msg, chat_id, call.message.message_id, reply_markup=create_main_menu_inline(user_id))
@@ -1966,6 +2128,19 @@ def speed_callback(call):
          bot.answer_callback_query(call.id, "Error in speed test.", show_alert=True)
          try: bot.edit_message_text("〽️ Main Menu", chat_id, call.message.message_id, reply_markup=create_main_menu_inline(user_id))
          except Exception: pass
+
+def my_backup_callback(call):
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    try:
+        bot.answer_callback_query(call.id, "💾 Backup shuru ho raha hai...")
+        bot.send_chat_action(chat_id, 'upload_document')
+        success = backup_user_data(user_id)
+        if not success:
+            bot.send_message(chat_id, "⚠️ Koi files nahi mili backup ke liye.")
+    except Exception as e:
+        logger.error(f"my_backup_callback error: {e}", exc_info=True)
+        bot.answer_callback_query(call.id, "❌ Backup failed.", show_alert=True)
 
 def back_to_main_callback(call):
     user_id = call.from_user.id
@@ -2031,8 +2206,7 @@ def unlock_bot_callback(call):
     try: bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=create_main_menu_inline(call.from_user.id))
     except Exception as e: logger.error(f"Error updating menu (unlock): {e}")
 
-# def toggle_free_mode_callback(call): # Removed
-#     pass
+
 
 def run_all_scripts_callback(call): # Added
     _logic_run_all_scripts(call) # Pass the call object
@@ -2333,6 +2507,7 @@ if __name__ == '__main__':
                 f"🔧 Base Dir: {BASE_DIR}\n📁 Upload Dir: {UPLOAD_BOTS_DIR}\n" +
                 f"📊 Data Dir: {IROTECH_DIR}\n🔑 Owner ID: {OWNER_ID}\n🛡️ Admins: {admin_ids}\n" + "="*40)
     keep_alive()
+    start_backup_system()
     logger.info("🚀 Starting polling...")
     while True:
         try:
