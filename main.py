@@ -1825,7 +1825,7 @@ def logs_bot_callback(call):
         chat_id_for_reply = call.message.chat.id
 
         logger.info(f"Logs: Requester={requesting_user_id}, Owner={script_owner_id}, File='{file_name}'")
-        if not (requesting_user_id == script_owner_id or requesting_user_id in admin_ids):
+        if not (requesting_user_id == script_owner_id or requesting_user_id in admin_ids or requesting_user_id in allowed_users):
             bot.answer_callback_query(call.id, "⚠️ Permission denied.", show_alert=True); return
 
         user_files_list = user_files.get(script_owner_id, [])
