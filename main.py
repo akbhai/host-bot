@@ -1841,31 +1841,39 @@ def _read_log_tail(log_path, max_chars=3000):
 
 def _live_log_worker(chat_id, msg_id, log_path, file_name):
     session = _live_log_sessions.get(msg_id, {})
-    deadline = time.time() + 60  # 1 minute auto-off
-    last_content = None
+    deadline = time.time() + 60
+    last_text = None
     stop_btn = types.InlineKeyboardMarkup()
     stop_btn.add(types.InlineKeyboardButton("⛔ Stop Live Logs", callback_data=f"stoplogs_{msg_id}"))
 
     while time.time() < deadline and not session.get("stop"):
         content = _read_log_tail(log_path)
         remaining = max(0, int(deadline - time.time()))
-        text = f"📜 **Live Logs** — `{file_name}`\n⏱ Auto-off in {remaining}s\n```\n{content}\n```"
-        if content != last_content:
+        # Escape backticks in content to avoid Markdown parse errors
+        safe_content = content.replace('`', "'")
+        text = f"📜 Live Logs — {file_name}\n⏱ Auto-off in {remaining}s\n\n<pre>{safe_content}</pre>"
+        if text != last_text:
             try:
-                bot.edit_message_text(text, chat_id, msg_id, parse_mode='Markdown', reply_markup=stop_btn)
-                last_content = content
+                bot.edit_message_text(text, chat_id, msg_id, parse_mode='HTML', reply_markup=stop_btn)
+                last_text = text
             except Exception as e:
-                if "message is not modified" not in str(e).lower():
-                    break
+                err = str(e).lower()
+                if "message is not modified" in err:
+                    pass  # fine, continue
+                elif "too many requests" in err:
+                    time.sleep(10)
+                else:
+                    logger.error(f"Live log edit error: {e}")
         time.sleep(3)
 
-    # Final update — stopped
+    # Final update
     try:
         content = _read_log_tail(log_path)
+        safe_content = content.replace('`', "'")
         reason = "⛔ Stopped" if session.get("stop") else "⏰ Auto-off (1 min)"
         bot.edit_message_text(
-            f"📜 **Logs** — `{file_name}` [{reason}]\n```\n{content}\n```",
-            chat_id, msg_id, parse_mode='Markdown'
+            f"📜 Logs — {file_name} [{reason}]\n\n<pre>{safe_content}</pre>",
+            chat_id, msg_id, parse_mode='HTML'
         )
     except: pass
     _live_log_sessions.pop(msg_id, None)
@@ -1892,12 +1900,13 @@ def logs_bot_callback(call):
 
         bot.answer_callback_query(call.id, "📜 Starting live logs...")
         content = _read_log_tail(log_path)
+        safe_content = content.replace('`', "'")
         stop_btn = types.InlineKeyboardMarkup()
 
         sent = bot.send_message(
             chat_id_for_reply,
-            f"📜 **Live Logs** — `{file_name}`\n⏱ Auto-off in 60s\n```\n{content}\n```",
-            parse_mode='Markdown',
+            f"📜 Live Logs — {file_name}\n⏱ Auto-off in 60s\n\n<pre>{safe_content}</pre>",
+            parse_mode='HTML',
             reply_markup=stop_btn
         )
         msg_id = sent.message_id
