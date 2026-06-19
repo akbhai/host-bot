@@ -1030,6 +1030,7 @@ def create_control_buttons(script_owner_id, file_name, is_running=True): # Param
         markup.row(
             types.InlineKeyboardButton("📜 View Logs", callback_data=f'logs_{script_owner_id}_{file_name}')
         )
+    markup.row(types.InlineKeyboardButton("💾 Backup", callback_data=f'backup_user_{script_owner_id}'))
     markup.add(types.InlineKeyboardButton("🔙 Back to Files", callback_data='check_files'))
     return markup
 
@@ -1630,6 +1631,7 @@ def _handle_callbacks_worker(call):
         elif data.startswith('logs_'): logs_bot_callback(call)
         elif data == 'speed': speed_callback(call)
         elif data == 'my_backup': my_backup_callback(call)
+        elif data.startswith('backup_user_'): backup_user_callback(call)
         elif data == 'back_to_main': back_to_main_callback(call)
         elif data.startswith('confirm_broadcast_'): handle_confirm_broadcast(call)
         elif data == 'cancel_broadcast': handle_cancel_broadcast(call)
@@ -2128,6 +2130,18 @@ def speed_callback(call):
          bot.answer_callback_query(call.id, "Error in speed test.", show_alert=True)
          try: bot.edit_message_text("〽️ Main Menu", chat_id, call.message.message_id, reply_markup=create_main_menu_inline(user_id))
          except Exception: pass
+
+def backup_user_callback(call):
+    try:
+        user_id = int(call.data.split('backup_user_')[1])
+        bot.answer_callback_query(call.id, "💾 Backup shuru ho raha hai...")
+        bot.send_chat_action(call.message.chat.id, 'upload_document')
+        success = backup_user_data(user_id)
+        if not success:
+            bot.send_message(call.message.chat.id, "⚠️ Koi files nahi mili backup ke liye.")
+    except Exception as e:
+        logger.error(f"backup_user_callback error: {e}", exc_info=True)
+        bot.answer_callback_query(call.id, "❌ Backup failed.", show_alert=True)
 
 def my_backup_callback(call):
     user_id = call.from_user.id
