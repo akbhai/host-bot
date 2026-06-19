@@ -385,7 +385,7 @@ def run_script(script_path, script_owner_id, user_folder, file_name, message_obj
             check_proc = None
             try:
                 check_proc = subprocess.Popen(check_command, cwd=user_folder, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore')
-                stdout, stderr = check_proc.communicate(timeout=5)
+                stdout, stderr = check_proc.communicate(timeout=2)
                 return_code = check_proc.returncode
                 logger.info(f"Python Pre-check early. RC: {return_code}. Stderr: {stderr[:200]}...")
                 if return_code != 0 and stderr:
@@ -497,7 +497,7 @@ def run_js_script(script_path, script_owner_id, user_folder, file_name, message_
             check_proc = None
             try:
                 check_proc = subprocess.Popen(check_command, cwd=user_folder, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore')
-                stdout, stderr = check_proc.communicate(timeout=5)
+                stdout, stderr = check_proc.communicate(timeout=2)
                 return_code = check_proc.returncode
                 logger.info(f"JS Pre-check early. RC: {return_code}. Stderr: {stderr[:200]}...")
                 if return_code != 0 and stderr:
