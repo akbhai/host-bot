@@ -79,17 +79,17 @@ admin_ids = {ADMIN_ID, OWNER_ID, 565094704, 7542402708} # Set of admin IDs
 allowed_users = set()  # Extra users added via /add
 bot_locked = False
 
-_orig_process = bot.process_new_updates
-def _admin_only(updates):
-    allowed = []
-    for u in updates:
-        uid = None
-        if u.message: uid = u.message.from_user.id
-        elif u.callback_query: uid = u.callback_query.from_user.id
-        if uid is None or uid in admin_ids or uid in allowed_users:
-            allowed.append(u)
-    _orig_process(allowed)
-bot.process_new_updates = _admin_only
+def _is_allowed(uid):
+    return uid in admin_ids or uid in allowed_users
+
+# Middleware — silently ignore non-allowed users
+@bot.message_handler(func=lambda m: not _is_allowed(m.from_user.id), content_types=['text','document','photo','video','audio','voice','sticker','animation','contact','location','poll','dice','game','invoice','venue'])
+def _block_non_allowed_msg(message):
+    pass  # Silent — no response
+
+@bot.callback_query_handler(func=lambda call: not _is_allowed(call.from_user.id))
+def _block_non_allowed_cb(call):
+    bot.answer_callback_query(call.id)  # Dismiss spinner silently
 # free_mode = False # Removed free_mode
 
 # --- Logging Setup ---
@@ -1342,7 +1342,7 @@ BUTTON_TEXT_TO_LOGIC = {
 @bot.message_handler(func=lambda message: message.text in BUTTON_TEXT_TO_LOGIC)
 def handle_button_text(message):
     logic_func = BUTTON_TEXT_TO_LOGIC.get(message.text)
-    if logic_func: logic_func(message)
+    if logic_func: threading.Thread(target=logic_func, args=(message,), daemon=True).start()
     else: logger.warning(f"Button text '{message.text}' matched but no logic func.")
 
 @bot.message_handler(commands=['updateschannel'])
@@ -1445,6 +1445,9 @@ def handle_file_upload_doc(message): # Renamed
 # --- Callback Query Handlers (for Inline Buttons) ---
 @bot.callback_query_handler(func=lambda call: True) 
 def handle_callbacks(call):
+    threading.Thread(target=_handle_callbacks_worker, args=(call,), daemon=True).start()
+
+def _handle_callbacks_worker(call):
     user_id = call.from_user.id
     data = call.data
     logger.info(f"Callback: User={user_id}, Data='{data}'")
@@ -2324,7 +2327,7 @@ if __name__ == '__main__':
     logger.info("🚀 Starting polling...")
     while True:
         try:
-            bot.infinity_polling(logger_level=logging.INFO, timeout=60, long_polling_timeout=30)
+            bot.infinity_polling(logger_level=logging.INFO, timeout=60, long_polling_timeout=30, skip_pending=True)
         except requests.exceptions.ReadTimeout: logger.warning("Polling ReadTimeout. Restarting in 5s..."); time.sleep(5)
         except requests.exceptions.ConnectionError as ce: logger.error(f"Polling ConnectionError: {ce}. Retrying in 15s..."); time.sleep(15)
         except Exception as e:
