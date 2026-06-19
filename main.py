@@ -68,7 +68,7 @@ os.makedirs(UPLOAD_BOTS_DIR, exist_ok=True)
 os.makedirs(IROTECH_DIR, exist_ok=True)
 
 # Initialize bot
-bot = telebot.TeleBot(TOKEN, num_threads=8)
+bot = telebot.TeleBot(TOKEN)
 
 # --- Data structures ---
 bot_scripts = {} # Stores info about running scripts {script_key: info_dict}
@@ -78,25 +78,17 @@ active_users = set() # Set of all user IDs that have interacted with the bot
 admin_ids = {ADMIN_ID, OWNER_ID, 565094704, 7542402708} # Set of admin IDs
 bot_locked = False
 
-# ── ADMIN ONLY MODE ───────────────────────────────────────────────────────────
-allowed_users = set()  # Extra users added by admin via /add
-
 _orig_process = bot.process_new_updates
-
 def _admin_only(updates):
     allowed = []
     for u in updates:
         uid = None
-        if u.message:
-            uid = u.message.from_user.id
-        elif u.callback_query:
-            uid = u.callback_query.from_user.id
-        if uid is None or uid in admin_ids or uid in allowed_users:
+        if u.message: uid = u.message.from_user.id
+        elif u.callback_query: uid = u.callback_query.from_user.id
+        if uid is None or uid in admin_ids:
             allowed.append(u)
     _orig_process(allowed)
-
 bot.process_new_updates = _admin_only
-# ─────────────────────────────────────────────────────────────────────────────
 # free_mode = False # Removed free_mode
 
 # --- Logging Setup ---
@@ -385,7 +377,7 @@ def run_script(script_path, script_owner_id, user_folder, file_name, message_obj
             check_proc = None
             try:
                 check_proc = subprocess.Popen(check_command, cwd=user_folder, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore')
-                stdout, stderr = check_proc.communicate(timeout=2)
+                stdout, stderr = check_proc.communicate(timeout=5)
                 return_code = check_proc.returncode
                 logger.info(f"Python Pre-check early. RC: {return_code}. Stderr: {stderr[:200]}...")
                 if return_code != 0 and stderr:
@@ -497,7 +489,7 @@ def run_js_script(script_path, script_owner_id, user_folder, file_name, message_
             check_proc = None
             try:
                 check_proc = subprocess.Popen(check_command, cwd=user_folder, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore')
-                stdout, stderr = check_proc.communicate(timeout=2)
+                stdout, stderr = check_proc.communicate(timeout=5)
                 return_code = check_proc.returncode
                 logger.info(f"JS Pre-check early. RC: {return_code}. Stderr: {stderr[:200]}...")
                 if return_code != 0 and stderr:
@@ -1287,43 +1279,6 @@ def _logic_run_all_scripts(message_or_call):
 
 
 # --- Command Handlers & Text Handlers for ReplyKeyboard ---
-@bot.message_handler(commands=['add'])
-def add_user(message):
-    if message.from_user.id not in admin_ids:
-        return
-    parts = message.text.strip().split()
-    if len(parts) < 2:
-        return bot.reply_to(message, "Usage: /add <user_id>")
-    try:
-        uid = int(parts[1])
-        allowed_users.add(uid)
-        bot.reply_to(message, f"✅ User `{uid}` added.", parse_mode="Markdown")
-    except ValueError:
-        bot.reply_to(message, "❌ Invalid user ID.")
-
-@bot.message_handler(commands=['remove'])
-def remove_user(message):
-    if message.from_user.id not in admin_ids:
-        return
-    parts = message.text.strip().split()
-    if len(parts) < 2:
-        return bot.reply_to(message, "Usage: /remove <user_id>")
-    try:
-        uid = int(parts[1])
-        allowed_users.discard(uid)
-        bot.reply_to(message, f"✅ User `{uid}` removed.", parse_mode="Markdown")
-    except ValueError:
-        bot.reply_to(message, "❌ Invalid user ID.")
-
-@bot.message_handler(commands=['allowlist'])
-def allowlist(message):
-    if message.from_user.id not in admin_ids:
-        return
-    if not allowed_users:
-        return bot.reply_to(message, "No extra users added yet.")
-    msg = "👥 **Allowed Users:**\n" + "\n".join(f"• `{uid}`" for uid in sorted(allowed_users))
-    bot.reply_to(message, msg, parse_mode="Markdown")
-
 @bot.message_handler(commands=['start', 'help'])
 def command_send_welcome(message): _logic_send_welcome(message)
 
