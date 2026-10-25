@@ -478,6 +478,118 @@ def kill_process_tree(process_info):
 
 # --- Automatic Package Installation & Script Running ---
 
+
+def _pip_install_resilient(req_or_packages, message=None, cwd=None, label="deps"):
+    """pip install with retries for Errno 11 (EAGAIN) on constrained hosts.
+    req_or_packages: path to requirements.txt OR list of package names.
+    Returns (ok: bool, log: str)
+    """
+    import time as _time
+    base_cmd = [
+        sys.executable, "-m", "pip", "install",
+        "--no-cache-dir",
+        "--disable-pip-version-check",
+        "--prefer-binary",
+    ]
+    if isinstance(req_or_packages, str):
+        cmd = base_cmd + ["-r", req_or_packages]
+        per_pkg = False
+    else:
+        cmd = base_cmd + list(req_or_packages)
+        per_pkg = True
+
+    last_err = ""
+    for attempt in range(1, 4):
+        try:
+            if message and attempt > 1:
+                try:
+                    bot.reply_to(message, f"🔄 Retry {attempt}/3 installing {label}...")
+                except Exception:
+                    pass
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=cwd,
+                encoding="utf-8",
+                errors="ignore",
+                timeout=600,
+            )
+            if result.returncode == 0:
+                return True, result.stdout or "ok"
+            last_err = (result.stderr or result.stdout or f"exit {result.returncode}")[:1500]
+            if "Resource temporarily unavailable" in last_err or "Errno 11" in last_err:
+                _time.sleep(2 * attempt)
+                continue
+            if not per_pkg and isinstance(req_or_packages, str):
+                break
+            _time.sleep(1)
+        except subprocess.TimeoutExpired:
+            last_err = "pip install timed out (600s)"
+            break
+        except OSError as e:
+            last_err = str(e)
+            if getattr(e, "errno", None) == 11 or "Resource temporarily unavailable" in str(e):
+                _time.sleep(3 * attempt)
+                continue
+            break
+        except Exception as e:
+            last_err = str(e)
+            if "Resource temporarily unavailable" in last_err or "Errno 11" in last_err:
+                _time.sleep(3 * attempt)
+                continue
+            break
+
+    if isinstance(req_or_packages, str) and os.path.isfile(req_or_packages):
+        try:
+            pkgs = []
+            with open(req_or_packages, "r", encoding="utf-8", errors="ignore") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or line.startswith("#") or line.startswith("-"):
+                        continue
+                    pkgs.append(line.split()[0])
+            ok_pkgs, fail_pkgs = [], []
+            for pkg in pkgs:
+                cmd1 = base_cmd + [pkg]
+                for attempt in range(1, 3):
+                    try:
+                        r = subprocess.run(
+                            cmd1, capture_output=True, text=True, check=False,
+                            cwd=cwd, encoding="utf-8", errors="ignore", timeout=300,
+                        )
+                        if r.returncode == 0:
+                            ok_pkgs.append(pkg)
+                            break
+                        err = r.stderr or r.stdout or ""
+                        if "Resource temporarily unavailable" in err or "Errno 11" in err:
+                            _time.sleep(2 * attempt)
+                            continue
+                        fail_pkgs.append(pkg)
+                        break
+                    except OSError as e:
+                        if getattr(e, "errno", None) == 11:
+                            _time.sleep(3 * attempt)
+                            continue
+                        fail_pkgs.append(pkg)
+                        break
+                    except Exception:
+                        fail_pkgs.append(pkg)
+                        break
+                else:
+                    fail_pkgs.append(pkg)
+            if ok_pkgs and not fail_pkgs:
+                return True, f"installed one-by-one: {', '.join(ok_pkgs)}"
+            if ok_pkgs:
+                return False, f"partial: ok={ok_pkgs} fail={fail_pkgs} last={last_err}"
+            return False, last_err or f"all failed: {fail_pkgs}"
+        except Exception as e:
+            return False, f"{last_err} | fallback error: {e}"
+
+    return False, last_err
+
+
 def attempt_install_pip(module_name, message):
     package_name = TELEGRAM_MODULES.get(module_name.lower(), module_name) 
     if package_name is None: 
@@ -485,19 +597,16 @@ def attempt_install_pip(module_name, message):
         return False 
     try:
         bot.reply_to(message, f"🐍 Module `{module_name}` not found. Installing `{package_name}`...", parse_mode='Markdown')
-        command = [sys.executable, '-m', 'pip', 'install', package_name]
-        logger.info(f"Running install: {' '.join(command)}")
-        result = subprocess.run(command, capture_output=True, text=True, check=False, encoding='utf-8', errors='ignore')
-        if result.returncode == 0:
-            logger.info(f"Installed {package_name}. Output:\n{result.stdout}")
+        logger.info(f"Running resilient install: {package_name}")
+        ok, log = _pip_install_resilient([package_name], message=message, label=package_name)
+        if ok:
+            logger.info(f"Installed {package_name}. Output:\n{log}")
             bot.reply_to(message, f"✅ Package `{package_name}` (for `{module_name}`) installed.", parse_mode='Markdown')
             return True
-        else:
-            error_msg = f"❌ Failed to install `{package_name}` for `{module_name}`.\nLog:\n```\n{result.stderr or result.stdout}\n```"
-            logger.error(error_msg)
-            if len(error_msg) > 4000: error_msg = error_msg[:4000] + "\n... (Log truncated)"
-            bot.reply_to(message, error_msg, parse_mode='Markdown')
-            return False
+        error_msg = f"❌ Failed to install `{package_name}` for `{module_name}`.\nLog:\n```\n{(log or '')[:3500]}\n```"
+        logger.error(error_msg)
+        bot.reply_to(message, error_msg, parse_mode='Markdown')
+        return False
     except Exception as e:
         error_msg = f"❌ Error installing `{package_name}`: {str(e)}"
         logger.error(error_msg, exc_info=True)
@@ -1084,19 +1193,14 @@ def handle_zip_file(downloaded_file_content, file_name_zip, message):
             req_path = os.path.join(temp_dir, req_file)
             logger.info(f"requirements.txt found, installing: {req_path}")
             bot.reply_to(message, f"🔄 Installing Python deps from `{req_file}`...")
-            try:
-                command = [sys.executable, '-m', 'pip', 'install', '-r', req_path]
-                result = subprocess.run(command, capture_output=True, text=True, check=True, encoding='utf-8', errors='ignore')
-                logger.info(f"pip install from requirements.txt OK. Output:\n{result.stdout}")
+            ok, log = _pip_install_resilient(req_path, message=message, cwd=None, label=req_file)
+            if ok:
+                logger.info(f"pip install from requirements.txt OK. Output:\n{log}")
                 bot.reply_to(message, f"✅ Python deps from `{req_file}` installed.")
-            except subprocess.CalledProcessError as e:
-                error_msg = f"❌ Failed to install Python deps from `{req_file}`.\nLog:\n```\n{e.stderr or e.stdout}\n```"
+            else:
+                error_msg = f"❌ Failed to install Python deps from `{req_file}`.\nLog:\n```\n{(log or '')[:3500]}\n```"
                 logger.error(error_msg)
-                if len(error_msg) > 4000: error_msg = error_msg[:4000] + "\n... (Log truncated)"
                 bot.reply_to(message, error_msg, parse_mode='Markdown'); return
-            except Exception as e:
-                 error_msg = f"❌ Unexpected error installing Python deps: {e}"
-                 logger.error(error_msg, exc_info=True); bot.reply_to(message, error_msg); return
 
         if pkg_json:
             logger.info(f"package.json found, npm install in: {temp_dir}")
