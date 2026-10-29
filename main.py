@@ -2682,10 +2682,26 @@ if __name__ == '__main__':
                 f"📊 Data Dir: {IROTECH_DIR}\n🔑 Owner ID: {OWNER_ID}\n🛡️ Admins: {admin_ids}\n" + "="*40)
     keep_alive()
     start_backup_system()
+    # Ensure buttons (callback_query) are received — clear any webhook and request full update types
+    try:
+        bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Webhook cleared before polling")
+    except Exception as e:
+        logger.warning(f"delete_webhook: {e}")
     logger.info("🚀 Starting polling...")
+    _allowed = [
+        'message', 'edited_message', 'callback_query', 'my_chat_member',
+        'chat_member', 'chat_join_request', 'inline_query', 'chosen_inline_result'
+    ]
     while True:
         try:
-            bot.infinity_polling(logger_level=logging.INFO, timeout=60, long_polling_timeout=30, skip_pending=True)
+            bot.infinity_polling(
+                logger_level=logging.INFO,
+                timeout=60,
+                long_polling_timeout=30,
+                skip_pending=True,
+                allowed_updates=_allowed,
+            )
         except requests.exceptions.ReadTimeout: logger.warning("Polling ReadTimeout. Restarting in 5s..."); time.sleep(5)
         except requests.exceptions.ConnectionError as ce: logger.error(f"Polling ConnectionError: {ce}. Retrying in 15s..."); time.sleep(15)
         except Exception as e:
