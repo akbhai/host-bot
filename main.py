@@ -378,6 +378,33 @@ def get_user_file_count(user_id):
     """Get the number of files uploaded by a user"""
     return len(user_files.get(user_id, []))
 
+
+def _parse_owner_file(data: str, prefix: str):
+    """Parse callback_data like start_123_main.py or file_123_stripe_bot.py"""
+    if not data.startswith(prefix):
+        raise ValueError(f"bad prefix for {data}")
+    rest = data[len(prefix):]
+    owner_str, file_name = rest.split('_', 1)
+    return int(owner_str), file_name
+
+def force_stop_script(script_owner_id, file_name):
+    """Kill tracked process for this script if any."""
+    script_key = f"{script_owner_id}_{file_name}"
+    info = bot_scripts.get(script_key)
+    if not info:
+        return False
+    try:
+        kill_process_tree(info)
+    except Exception as e:
+        logger.error(f"force_stop kill error {script_key}: {e}")
+    if script_key in bot_scripts:
+        try:
+            del bot_scripts[script_key]
+        except Exception:
+            pass
+    return True
+
+
 def is_bot_running(script_owner_id, file_name): # Parameter renamed for clarity
     """Check if a bot script is currently running for a specific user"""
     script_key = f"{script_owner_id}_{file_name}" # Key uses script_owner_id
@@ -1846,8 +1873,7 @@ def check_files_callback(call):
 
 def file_control_callback(call):
     try:
-        _, script_owner_id_str, file_name = call.data.split('_', 2)
-        script_owner_id = int(script_owner_id_str)
+        script_owner_id, file_name = _parse_owner_file(call.data, 'file_')
         requesting_user_id = call.from_user.id
 
         # Allow owner/admin to control any file, or user to control their own
@@ -1888,36 +1914,35 @@ def file_control_callback(call):
 
 def start_bot_callback(call):
     try:
-        _, script_owner_id_str, file_name = call.data.split('_', 2)
-        script_owner_id = int(script_owner_id_str)
+        script_owner_id, file_name = _parse_owner_file(call.data, 'start_')
         requesting_user_id = call.from_user.id
-        chat_id_for_reply = call.message.chat.id # Where the admin/user gets the reply
+        chat_id_for_reply = call.message.chat.id
 
         logger.info(f"Start request: Requester={requesting_user_id}, Owner={script_owner_id}, File='{file_name}'")
 
         if not (requesting_user_id == script_owner_id or requesting_user_id in admin_ids):
-            bot.answer_callback_query(call.id, "⚠️ Permission denied to start this script.", show_alert=True); return
+            bot.send_message(chat_id_for_reply, "⚠️ Permission denied to start this script."); return
 
         user_files_list = user_files.get(script_owner_id, [])
         file_info = next((f for f in user_files_list if f[0] == file_name), None)
         if not file_info:
-            bot.answer_callback_query(call.id, "⚠️ File not found.", show_alert=True); check_files_callback(call); return
+            bot.send_message(chat_id_for_reply, "⚠️ File not found."); check_files_callback(call); return
 
         file_type = file_info[1]
         user_folder = get_user_folder(script_owner_id)
         file_path = os.path.join(user_folder, file_name)
 
         if not os.path.exists(file_path):
-            bot.answer_callback_query(call.id, f"⚠️ Error: File `{file_name}` missing! Re-upload.", show_alert=True)
+            bot.send_message(chat_id_for_reply, f"⚠️ Error: File `{file_name}` missing! Re-upload.")
             remove_user_file_db(script_owner_id, file_name); check_files_callback(call); return
 
+        # Always kill stale/zombie so Start actually launches
         if is_bot_running(script_owner_id, file_name):
-            bot.answer_callback_query(call.id, f"⚠️ Script '{file_name}' already running.", show_alert=True)
-            try: bot.edit_message_reply_markup(chat_id_for_reply, call.message.message_id, reply_markup=create_control_buttons(script_owner_id, file_name, True))
-            except Exception as e: logger.error(f"Error updating buttons (already running): {e}")
-            return
+            logger.info(f"Start: force-stopping existing {script_owner_id}_{file_name}")
+            force_stop_script(script_owner_id, file_name)
+            time.sleep(0.8)
 
-        bot.answer_callback_query(call.id, f"⏳ Attempting to start {file_name} for user {script_owner_id}...")
+        bot.send_message(chat_id_for_reply, f"⏳ Starting `{file_name}` for user {script_owner_id}...", parse_mode='Markdown')
 
         # Pass call.message as message_obj_for_reply so feedback goes to the person who clicked
         if file_type == 'py':
@@ -1953,8 +1978,8 @@ def start_bot_callback(call):
 
 def stop_bot_callback(call):
     try:
-        _, script_owner_id_str, file_name = call.data.split('_', 2)
-        script_owner_id = int(script_owner_id_str)
+        script_owner_id, file_name = _parse_owner_file(call.data, call.data.split('_')[0] + '_')
+        # script_owner_id already int from helper
         requesting_user_id = call.from_user.id
         chat_id_for_reply = call.message.chat.id
 
@@ -2005,8 +2030,8 @@ def stop_bot_callback(call):
 
 def restart_bot_callback(call):
     try:
-        _, script_owner_id_str, file_name = call.data.split('_', 2)
-        script_owner_id = int(script_owner_id_str)
+        script_owner_id, file_name = _parse_owner_file(call.data, call.data.split('_')[0] + '_')
+        # script_owner_id already int from helper
         requesting_user_id = call.from_user.id
         chat_id_for_reply = call.message.chat.id
 
@@ -2071,8 +2096,8 @@ def restart_bot_callback(call):
 
 def delete_bot_callback(call):
     try:
-        _, script_owner_id_str, file_name = call.data.split('_', 2)
-        script_owner_id = int(script_owner_id_str)
+        script_owner_id, file_name = _parse_owner_file(call.data, call.data.split('_')[0] + '_')
+        # script_owner_id already int from helper
         requesting_user_id = call.from_user.id
         chat_id_for_reply = call.message.chat.id
 
@@ -2181,8 +2206,8 @@ def _live_log_worker(chat_id, msg_id, log_path, file_name):
 
 def logs_bot_callback(call):
     try:
-        _, script_owner_id_str, file_name = call.data.split('_', 2)
-        script_owner_id = int(script_owner_id_str)
+        script_owner_id, file_name = _parse_owner_file(call.data, call.data.split('_')[0] + '_')
+        # script_owner_id already int from helper
         requesting_user_id = call.from_user.id
         chat_id_for_reply = call.message.chat.id
 
