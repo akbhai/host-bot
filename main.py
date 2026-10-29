@@ -1712,55 +1712,86 @@ def handle_file_upload_doc(message): # Renamed
 
 
 # --- Callback Query Handlers (for Inline Buttons) ---
-@bot.callback_query_handler(func=lambda call: True) 
+@bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
-    threading.Thread(target=_handle_callbacks_worker, args=(call,), daemon=True).start()
-
-def _handle_callbacks_worker(call):
+    # Answer immediately so Telegram spinner stops; run logic sync (thread was dropping button responses)
     user_id = call.from_user.id
-    data = call.data
+    data = call.data or ""
     logger.info(f"Callback: User={user_id}, Data='{data}'")
+    try:
+        bot.answer_callback_query(call.id)
+    except Exception as e_ans:
+        logger.warning(f"answer_callback_query failed: {e_ans}")
 
-    if bot_locked and user_id not in admin_ids and data not in ['back_to_main', 'speed', 'stats']: # Allow stats
-        bot.answer_callback_query(call.id, "⚠️ Bot locked by admin.", show_alert=True)
+    if bot_locked and user_id not in admin_ids and data not in ['back_to_main', 'speed', 'stats']:
+        try:
+            bot.answer_callback_query(call.id, "⚠️ Bot locked by admin.", show_alert=True)
+        except Exception:
+            pass
         return
     try:
-        if data == 'upload': upload_callback(call)
-        elif data == 'check_files': check_files_callback(call)
-        elif data.startswith('file_'): file_control_callback(call)
-        elif data.startswith('start_'): start_bot_callback(call)
-        elif data.startswith('stop_'): stop_bot_callback(call)
-        elif data.startswith('restart_'): restart_bot_callback(call)
-        elif data.startswith('delete_'): delete_bot_callback(call)
-        elif data.startswith('logs_'): logs_bot_callback(call)
-        elif data == 'speed': speed_callback(call)
-        elif data == 'my_backup': my_backup_callback(call)
-        elif data.startswith('backup_user_'): backup_user_callback(call)
-        elif data == 'back_to_main': back_to_main_callback(call)
-        elif data.startswith('confirm_broadcast_'): handle_confirm_broadcast(call)
-        elif data == 'cancel_broadcast': handle_cancel_broadcast(call)
-        # --- Admin Callbacks ---
-        elif data == 'subscription': admin_required_callback(call, subscription_management_callback)
-        elif data == 'stats': stats_callback(call) # No admin check here, handled in func
-        elif data == 'lock_bot': admin_required_callback(call, lock_bot_callback)
-        elif data == 'unlock_bot': admin_required_callback(call, unlock_bot_callback)
-
-        elif data == 'run_all_scripts': admin_required_callback(call, run_all_scripts_callback) # Added
-        elif data == 'broadcast': admin_required_callback(call, broadcast_init_callback) 
-        elif data == 'admin_panel': admin_required_callback(call, admin_panel_callback)
-        elif data == 'add_admin': owner_required_callback(call, add_admin_init_callback) 
-        elif data == 'remove_admin': owner_required_callback(call, remove_admin_init_callback) 
-        elif data == 'list_admins': admin_required_callback(call, list_admins_callback)
-        elif data == 'add_subscription': admin_required_callback(call, add_subscription_init_callback) 
-        elif data == 'remove_subscription': admin_required_callback(call, remove_subscription_init_callback) 
-        elif data == 'check_subscription': admin_required_callback(call, check_subscription_init_callback) 
+        if data == 'upload':
+            upload_callback(call)
+        elif data == 'check_files':
+            check_files_callback(call)
+        elif data.startswith('file_'):
+            file_control_callback(call)
+        elif data.startswith('start_'):
+            start_bot_callback(call)
+        elif data.startswith('stop_'):
+            stop_bot_callback(call)
+        elif data.startswith('restart_'):
+            restart_bot_callback(call)
+        elif data.startswith('delete_'):
+            delete_bot_callback(call)
+        elif data.startswith('logs_'):
+            logs_bot_callback(call)
+        elif data == 'speed':
+            speed_callback(call)
+        elif data == 'my_backup':
+            my_backup_callback(call)
+        elif data.startswith('backup_user_'):
+            backup_user_callback(call)
+        elif data == 'back_to_main':
+            back_to_main_callback(call)
+        elif data.startswith('confirm_broadcast_'):
+            handle_confirm_broadcast(call)
+        elif data == 'cancel_broadcast':
+            handle_cancel_broadcast(call)
+        elif data == 'subscription':
+            admin_required_callback(call, subscription_management_callback)
+        elif data == 'stats':
+            stats_callback(call)
+        elif data == 'lock_bot':
+            admin_required_callback(call, lock_bot_callback)
+        elif data == 'unlock_bot':
+            admin_required_callback(call, unlock_bot_callback)
+        elif data == 'run_all_scripts':
+            admin_required_callback(call, run_all_scripts_callback)
+        elif data == 'broadcast':
+            admin_required_callback(call, broadcast_init_callback)
+        elif data == 'admin_panel':
+            admin_required_callback(call, admin_panel_callback)
+        elif data == 'add_admin':
+            owner_required_callback(call, add_admin_init_callback)
+        elif data == 'remove_admin':
+            owner_required_callback(call, remove_admin_init_callback)
+        elif data == 'list_admins':
+            admin_required_callback(call, list_admins_callback)
+        elif data == 'add_subscription':
+            admin_required_callback(call, add_subscription_init_callback)
+        elif data == 'remove_subscription':
+            admin_required_callback(call, remove_subscription_init_callback)
+        elif data == 'check_subscription':
+            admin_required_callback(call, check_subscription_init_callback)
         else:
-            bot.answer_callback_query(call.id, "Unknown action.")
             logger.warning(f"Unhandled callback data: {data} from user {user_id}")
     except Exception as e:
         logger.error(f"Error handling callback '{data}' for {user_id}: {e}", exc_info=True)
-        try: bot.answer_callback_query(call.id, "Error processing request.", show_alert=True)
-        except Exception as e_ans: logger.error(f"Failed to answer callback after error: {e_ans}")
+        try:
+            bot.answer_callback_query(call.id, "Error processing request.", show_alert=True)
+        except Exception as e_ans:
+            logger.error(f"Failed to answer callback after error: {e_ans}")
 
 def admin_required_callback(call, func_to_run):
     if call.from_user.id not in admin_ids:
